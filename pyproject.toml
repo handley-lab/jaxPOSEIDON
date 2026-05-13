@@ -30,8 +30,11 @@ dependencies = [
 [project.optional-dependencies]
 test = [
     "pytest",
-    "POSEIDON-retrievals",  # numerical oracle; not actually on PyPI under this name — use git+ in real install
 ]
+# POSEIDON itself is the numerical oracle used by every phase test, but it
+# is not on PyPI. Install it separately:
+#   pip install git+https://github.com/MartianColonist/POSEIDON
+# and set POSEIDON_input_data to the opacity-database directory.
 
 [project.urls]
 Source = "https://github.com/handley-lab/jaxposeidon"

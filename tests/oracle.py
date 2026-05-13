@@ -81,10 +81,34 @@ def canonical_rayleigh_config():
 
 
 def poseidon_transmission_spectrum(cfg):
-    """Run POSEIDON's compute_spectrum on the canonical Rayleigh config."""
+    """Run POSEIDON's compute_spectrum on a config dict from canonical_*."""
     from POSEIDON.core import compute_spectrum
     return compute_spectrum(
         cfg["planet"], cfg["star"], cfg["model"],
         cfg["atmosphere"], cfg["opac"], cfg["wl"],
         spectrum_type="transmission",
     )
+
+
+def paired_transmission_spectra(jax_compute_spectrum, cfg=None):
+    """Run POSEIDON and a jaxposeidon-side callable on the same config.
+
+    Phase 0 calls this with `jax_compute_spectrum` raising
+    NotImplementedError because the JAX forward model is not yet ported.
+    Each subsequent phase progressively wires the JAX side until the
+    paired call returns two spectra whose difference is within the
+    phase's tolerance target.
+
+    Args:
+        jax_compute_spectrum: callable accepting the config dict and
+            returning a 1D spectrum array.
+        cfg: optional config dict; defaults to canonical_rayleigh_config().
+
+    Returns:
+        (spectrum_poseidon, spectrum_jax) — both 1D arrays on cfg['wl'].
+    """
+    if cfg is None:
+        cfg = canonical_rayleigh_config()
+    spectrum_pos = poseidon_transmission_spectrum(cfg)
+    spectrum_jax = jax_compute_spectrum(cfg)
+    return spectrum_pos, spectrum_jax

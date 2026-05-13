@@ -1,5 +1,7 @@
 """Phase 0 scaffold tests — imports, oracle availability."""
 
+import pytest
+
 def test_jaxposeidon_imports():
     """Package and stub modules import cleanly."""
     import jaxposeidon
@@ -29,14 +31,61 @@ def test_poseidon_oracle_available():
     ))
 
 
+K2_18B_TARGETS = {"H2O", "CH4", "CO2", "CO", "NH3", "HCN",
+                  "OCS", "N2O", "CH3Cl", "CS2", "C2H6S"}
+
+
 def test_k2_18b_species_supported_in_poseidon():
     """K2-18 b target species are in POSEIDON's supported_species table.
 
-    DMS = C2H6S, DMDS = C2H6S2 per POSEIDON naming convention.
+    DMS = C2H6S per POSEIDON naming convention (DMDS = C2H6S2 also present).
     """
     from POSEIDON.supported_chemicals import supported_species
 
-    targets = {"H2O", "CH4", "CO2", "CO", "NH3", "HCN",
-               "OCS", "N2O", "CH3Cl", "CS2", "C2H6S"}
-    missing = targets - set(supported_species.tolist())
+    missing = K2_18B_TARGETS - set(supported_species.tolist())
     assert not missing, f"Missing K2-18b target species in POSEIDON: {missing}"
+
+
+def test_k2_18b_species_in_opacity_hdf5(poseidon_input_data):
+    """K2-18 b target species exist as groups in Opacity_database_v1.3.hdf5
+    and each group carries the schema documented in the plan:
+    `T`, `log(P)`, `nu`, `log(sigma)` (POSEIDON/POSEIDON/absorption.py:929-943).
+    """
+    import os
+    import h5py
+    db_path = os.path.join(poseidon_input_data, "opacity",
+                           "Opacity_database_v1.3.hdf5")
+    if not os.path.isfile(db_path):
+        import pytest
+        pytest.skip(f"{db_path} not found; opacity DB not installed at "
+                    f"this version.")
+
+    required_datasets = ("T", "log(P)", "nu", "log(sigma)")
+    with h5py.File(db_path, "r") as f:
+        groups_present = set(f.keys())
+        missing_groups = K2_18B_TARGETS - groups_present
+        assert not missing_groups, (
+            f"Missing species groups in {db_path}: {missing_groups}"
+        )
+        for sp in sorted(K2_18B_TARGETS):
+            for ds in required_datasets:
+                assert ds in f[sp], (
+                    f"{sp}/{ds} missing in {db_path} "
+                    f"(schema per absorption.py:929-943)"
+                )
+
+
+def test_paired_oracle_harness_shape():
+    """tests/oracle.paired_transmission_spectra wires both sides correctly.
+
+    Phase 0 stubs the JAX side with a NotImplementedError-raising callable;
+    the harness must propagate that without swallowing it. Each subsequent
+    phase will replace the stub with progressively more port code.
+    """
+    from tests.oracle import paired_transmission_spectra
+
+    def jax_stub(cfg):
+        raise NotImplementedError("jaxposeidon forward model: Phase 1+")
+
+    with pytest.raises(NotImplementedError):
+        paired_transmission_spectra(jax_stub)
