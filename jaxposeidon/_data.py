@@ -107,15 +107,25 @@ def loglikelihood(ymodel, ydata, err_data, *,
                   offset_1_start=0, offset_1_end=0,
                   offset_2_start=0, offset_2_end=0,
                   offset_3_start=0, offset_3_end=0,
-                  norm_log_default=0.0, ln_prior_TP=0.0):
+                  norm_log_default=None, ln_prior_TP=0.0):
     """Gaussian likelihood with optional offsets + error inflation.
 
     Mirrors POSEIDON `retrieval.py:1065-1183` for the v0 envelope.
     Returns `-1e100` if `ymodel` contains NaN (POSEIDON's unphysical-
     spectrum sentinel at `retrieval.py:1066-1072`).
+
+    If `error_inflation is None` and `norm_log_default is None`, the
+    Gaussian normalisation `Σ -0.5 ln(2π·σ²)` from the static `err_data`
+    is computed and included, matching POSEIDON's `norm_log_default`
+    precomputation in `retrieval.py` before `LogLikelihood`.
     """
     if np.any(np.isnan(ymodel)):
         return -1.0e100
+
+    if error_inflation is None and norm_log_default is None:
+        norm_log_default = (-0.5 * np.log(2.0 * np.pi * err_data * err_data)).sum()
+    elif norm_log_default is None:
+        norm_log_default = 0.0
 
     err_eff_sq, norm_log = effective_error_sq(
         err_data, ymodel, np.asarray(err_inflation_params),
