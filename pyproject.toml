@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaxposeidon"
+version = "0.0.1.dev0"
+description = "JAX-native port of POSEIDON's transmission-spectroscopy forward model."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Will Handley", email = "wh260@cam.ac.uk" },
+]
+keywords = ["exoplanets", "atmospheric-retrieval", "jax", "transmission-spectroscopy", "POSEIDON"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+    "jax",
+    "numpy",
+    "scipy",
+    "h5py",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "POSEIDON-retrievals",  # numerical oracle; not actually on PyPI under this name — use git+ in real install
+]
+
+[project.urls]
+Source = "https://github.com/handley-lab/jaxposeidon"
+"POSEIDON (oracle)" = "https://github.com/MartianColonist/POSEIDON"
+
+[tool.setuptools.packages.find]
+include = ["jaxposeidon*"]
+exclude = ["tests*", "scripts*"]
