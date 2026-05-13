@@ -5,8 +5,9 @@ Mirrors the v0 paths through POSEIDON's `atmosphere.py:profiles(...)`
 
 - `PT_profile in {'isotherm', 'Madhu'}`, `PT_dim == 1`
 - `X_profile == 'isochem'`, `X_dim == 1`, no per-species gradients
-- `bulk_species` is either `['H2']`, `['H2', 'He']`, or any single non-ghost
-  species. H2+H+He dissociation mixture is deferred.
+- `bulk_species` is one of: `['H2']`, `['H2', 'He']`, `['H', 'He']`,
+  or any single non-ghost species. H2+H+He dissociation mixture is
+  deferred.
 - `Atmosphere_dimension == 1` (N_sectors = N_zones = 1)
 - `disable_atmosphere == False`
 
