@@ -24,6 +24,13 @@ from scipy.ndimage import gaussian_filter1d
 
 
 # ---------------------------------------------------------------------------
+# v0 envelope check for profiles(...)
+# ---------------------------------------------------------------------------
+_V0_PT_PROFILES = {"isotherm", "Madhu"}
+_V0_X_PROFILES = {"isochem"}
+
+
+# ---------------------------------------------------------------------------
 # P-T profile builders (1D only)
 # ---------------------------------------------------------------------------
 def compute_T_isotherm(P, T_iso):
@@ -231,6 +238,56 @@ def radial_profiles(P, T, g_0, R_p, P_ref, R_p_ref, mu, N_sectors, N_zones):
     return n, r, r_up, r_low, dr
 
 
+# ---------------------------------------------------------------------------
+# Mixing-ratio categorisation
+# ---------------------------------------------------------------------------
+# POSEIDON `supported_chemicals.inactive_species` — duplicated here to keep
+# the v0 port standalone. Kept in sync with
+# `POSEIDON/POSEIDON/supported_chemicals.py:121` (`inactive_species`).
+_INACTIVE_SPECIES = np.array(["H2", "He", "H", "e-", "H-", "N2", "ghost"])
+
+
+def mixing_ratio_categories(P, X, N_sectors, N_zones, included_species,
+                            active_species, CIA_pairs, ff_pairs, bf_species):
+    """Slice the full X array into active / CIA / ff / bf categories.
+
+    Mirrors POSEIDON `atmosphere.py:1722-1813`. Used by `profiles(...)`
+    to package the atmosphere tuple for the extinction stage.
+    """
+    N_layers = len(P)
+    N_species_active = len(active_species)
+    N_CIA_pairs = len(CIA_pairs)
+    N_ff_pairs = len(ff_pairs)
+    N_bf_species = len(bf_species)
+
+    included = np.asarray(included_species)
+    inactive_mask = np.isin(included, _INACTIVE_SPECIES)
+
+    X_active = X[~inactive_mask, :, :, :]
+    X_CIA = np.zeros((2, N_CIA_pairs, N_layers, N_sectors, N_zones))
+    X_ff = np.zeros((2, N_ff_pairs, N_layers, N_sectors, N_zones))
+    X_bf = np.zeros((N_bf_species, N_layers, N_sectors, N_zones))
+
+    for q in range(N_CIA_pairs):
+        pair = CIA_pairs[q]
+        a, b = pair.split("-")
+        X_CIA[0, q, :, :, :] = X[included == a, :, :, :]
+        X_CIA[1, q, :, :, :] = X[included == b, :, :, :]
+
+    for q in range(N_ff_pairs):
+        pair = ff_pairs[q]
+        if pair == "H-ff":
+            X_ff[0, q, :, :, :] = X[included == "H", :, :, :]
+            X_ff[1, q, :, :, :] = X[included == "e-", :, :, :]
+
+    for q in range(N_bf_species):
+        species = bf_species[q]
+        if species == "H-bf":
+            X_bf[q, :, :, :] = X[included == "H-", :, :, :]
+
+    return X_active, X_CIA, X_ff, X_bf
+
+
 def radial_profiles_constant_g(P, T, g_0, P_ref, R_p_ref, mu, N_sectors, N_zones):
     """Constant-gravity hydrostatic radius profile.
 
@@ -284,3 +341,117 @@ def radial_profiles_constant_g(P, T, g_0, P_ref, R_p_ref, mu, N_sectors, N_zones
             )
 
     return n, r, r_up, r_low, dr
+
+
+# ---------------------------------------------------------------------------
+# profiles() — v0 top-level dispatcher
+# ---------------------------------------------------------------------------
+def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
+             log_X_state, included_species, bulk_species, param_species,
+             active_species, CIA_pairs, ff_pairs, bf_species,
+             N_sectors, N_zones, alpha, beta, phi, theta,
+             species_vert_gradient, He_fraction,
+             T_input=None, X_input=None, P_param_set=1.0e-6,
+             log_P_slope_phot=0.5,
+             log_P_slope_arr=(-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0),
+             Na_K_fixed_ratio=False,
+             constant_gravity=False, chemistry_grid=None,
+             PT_penalty=False, T_eq=None, mu_back=None,
+             disable_atmosphere=False):
+    """v0 port of POSEIDON `atmosphere.py:profiles(...)` (2015-2493).
+
+    Returns the same 13-tuple POSEIDON does:
+        (T, n, r, r_up, r_low, dr, mu, X, X_active, X_CIA, X_ff, X_bf, physical)
+    where `physical` is True/False indicating whether the configuration
+    produced a valid atmosphere.
+
+    v0 envelope (see plan Phase 2):
+      - disable_atmosphere=False
+      - PT_profile in {'isotherm', 'Madhu'} with len(PT_state)==1 or 6
+      - X_profile == 'isochem'
+      - X_dim=1, no species gradients
+      - bulk_species per add_bulk_component v0 set
+      - N_sectors == N_zones == 1
+    Any other configuration raises NotImplementedError.
+    """
+    if disable_atmosphere:
+        raise NotImplementedError("v0 does not support disable_atmosphere=True")
+    if N_sectors != 1 or N_zones != 1:
+        raise NotImplementedError(
+            f"v0 requires N_sectors=N_zones=1 (got {N_sectors}, {N_zones})"
+        )
+    if PT_profile not in _V0_PT_PROFILES:
+        raise NotImplementedError(
+            f"PT_profile={PT_profile!r} not in v0 ({sorted(_V0_PT_PROFILES)})"
+        )
+    if X_profile not in _V0_X_PROFILES:
+        raise NotImplementedError(
+            f"X_profile={X_profile!r} not in v0 ({sorted(_V0_X_PROFILES)})"
+        )
+    if len(species_vert_gradient) > 0:
+        raise NotImplementedError("v0 forbids per-species vertical gradients")
+    if Na_K_fixed_ratio:
+        raise NotImplementedError("Na_K_fixed_ratio is deferred to v1")
+    if mu_back is not None:
+        raise NotImplementedError("ghost-bulk mu_back is deferred to v1")
+    if T_input is not None or X_input is not None:
+        raise NotImplementedError("file_read PT/X are deferred to v1")
+    if chemistry_grid is not None:
+        raise NotImplementedError("chem_eq grids are deferred to v1")
+
+    if PT_profile == "isotherm":
+        if len(PT_state) != 1:
+            raise NotImplementedError(
+                "v0 isotherm requires len(PT_state)==1 (no 2D/3D)"
+            )
+        T_rough = compute_T_isotherm(P, float(PT_state[0]))
+        T = T_rough
+    else:
+        if len(PT_state) != 6:
+            raise NotImplementedError(
+                "v0 Madhu requires PT_dim=1 (len(PT_state)==6)"
+            )
+        a1, a2, log_P1, log_P2, log_P3, T_set = PT_state
+        if (log_P3 < log_P2) or (log_P3 < log_P1):
+            return (0,) * 12 + (False,)
+        T_rough = compute_T_Madhu(P, a1, a2, log_P1, log_P2, log_P3, T_set,
+                                  P_param_set)
+        T = gauss_conv(T_rough, sigma=3, axis=0, mode="nearest")
+
+    X_param = compute_X_isochem_1D(P, log_X_state, N_sectors, N_zones,
+                                    param_species)
+
+    N_species = len(included_species)
+    X = add_bulk_component(P, T, X_param, N_species, N_sectors, N_zones,
+                           bulk_species, He_fraction)
+
+    if np.any(X[0, :, :, :] < 0.0):
+        return (0,) * 12 + (False,)
+
+    X_active, X_CIA, X_ff, X_bf = mixing_ratio_categories(
+        P, X, N_sectors, N_zones, included_species,
+        active_species, CIA_pairs, ff_pairs, bf_species,
+    )
+
+    from POSEIDON.species_data import masses as _poseidon_masses
+    masses_all = np.zeros(N_species)
+    for q in range(N_species):
+        sp = included_species[q]
+        if sp == "ghost":
+            raise NotImplementedError("ghost bulk species deferred to v1")
+        masses_all[q] = _poseidon_masses[sp]
+    mu = compute_mean_mol_mass(P, X, N_species, N_sectors, N_zones, masses_all)
+
+    if constant_gravity:
+        n, r, r_up, r_low, dr = radial_profiles_constant_g(
+            P, T, g_0, P_ref, R_p_ref, mu, N_sectors, N_zones,
+        )
+    else:
+        n, r, r_up, r_low, dr = radial_profiles(
+            P, T, g_0, R_p, P_ref, R_p_ref, mu, N_sectors, N_zones,
+        )
+
+    if np.any(r < 0.0):
+        return (0,) * 12 + (False,)
+
+    return T, n, r, r_up, r_low, dr, mu, X, X_active, X_CIA, X_ff, X_bf, True
