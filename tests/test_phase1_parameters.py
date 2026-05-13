@@ -118,11 +118,110 @@ def test_v0_config_accepts_k2_18b_one_offset():
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           species_vert_gradient=("H2O",)), "gradients"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          object_type="directly_imaged"), "transiting"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          disable_atmosphere=True), "disable_atmosphere"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          reference_parameter="invalid"), "reference_parameter"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          mass_setting="free"), "mass_setting='fixed'"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          bulk_species=("ghost",)), "ghost"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          X_dim=2), "PT_dim=1, X_dim=1"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          cloud_type="shiny_deck"), "cloud_type"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          offsets_applied="four_datasets"), "offsets_applied"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          error_inflation="Custom"), "error_inflation"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          opaque_Iceberg=True), "Iceberg/Mie"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          TwoD_type="D-N"), "TwoD_type"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          Atmosphere_dimension=2), "Atmosphere_dimension"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          sharp_DN_transition=True), "sharp_DN_transition"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          sharp_EM_transition=True), "sharp"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          PT_penalty=True), "PT_penalty"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          lognormal_logwidth_free=True), "lognormal_logwidth_free"),
+    (dict(PT_profile="Madhu", X_profile="isochem",
+          cloud_model="MacMad17", cloud_dim=2,
+          surface_model="constant"), "surface_model='gray'"),
 ])
 def test_v0_config_rejects_out_of_scope(kwargs, err_substring):
     """Non-v0 configurations raise NotImplementedError with descriptive message."""
     with pytest.raises(NotImplementedError, match=err_substring):
         assert_v0_model_config(**kwargs)
+
+
+def test_unsupported_kwargs_raise_NotImplementedError_not_TypeError():
+    """POSEIDON-side deferred kwargs raise NotImplementedError when actively set."""
+    base = dict(
+        param_species=["H2O"],
+        bulk_species=["H2"],
+        PT_profile="isotherm",
+        X_profile="isochem",
+        cloud_model="cloud-free",
+        cloud_dim=1,
+    )
+    # Each of these activates a deferred POSEIDON branch and must NOT TypeError.
+    for kw in [{"sharp_DN_transition": True}, {"sharp_EM_transition": True},
+               {"PT_penalty": True}, {"lognormal_logwidth_free": True},
+               {"Atmosphere_dimension": 2}, {"opaque_Iceberg": True}]:
+        with pytest.raises(NotImplementedError):
+            assign_free_params(**base, **kw)
+
+
+def test_inert_tuning_kwargs_silently_accepted():
+    """Tuning knobs only relevant under deferred branches are accepted as no-ops."""
+    base = dict(
+        param_species=["H2O"],
+        bulk_species=["H2"],
+        PT_profile="isotherm",
+        X_profile="isochem",
+        cloud_model="cloud-free",
+        cloud_dim=1,
+    )
+    # These shouldn't change v0 output even at unusual values because the
+    # branches they control are deferred.
+    out_default = assign_free_params(**base)
+    for kw in [{"TwoD_param_scheme": "absolute"},
+               {"log_P_slope_arr": (-2.0, -1.0)},
+               {"number_P_knots": 5},
+               {"alpha_high_res_option": "linear"},
+               {"fix_alpha_high_res": True},
+               {"fix_W_conv_high_res": True},
+               {"fix_beta_high_res": False},
+               {"fix_Delta_phi_high_res": False},
+               {"surface_components": ["basalt"]},
+               {"surface_percentage_option": "log"},
+               {"thermal": False},
+               {"reflection": True}]:
+        out = assign_free_params(**base, **kw)
+        for a, b in zip(out, out_default):
+            np.testing.assert_array_equal(a, b)
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +450,52 @@ def test_assign_free_params_N_params_cumulative_shape():
     assert out[-1].shape == (10,)
     # Cumulative array is non-decreasing.
     assert np.all(np.diff(out[-1]) >= 0)
+
+
+# Cloud-case tuples (cloud_model, cloud_type, cloud_dim) that the v0
+# envelope accepts. cloud-free ignores cloud_type but accepts cloud_dim
+# 1 or 2; MacMad17 supports {deck, haze, deck_haze} × {1, 2}.
+_CLOUD_CASES = [
+    ("cloud-free", "deck", 1),
+    ("cloud-free", "deck", 2),
+    ("MacMad17", "deck", 1),
+    ("MacMad17", "deck", 2),
+    ("MacMad17", "haze", 1),
+    ("MacMad17", "haze", 2),
+    ("MacMad17", "deck_haze", 1),
+    ("MacMad17", "deck_haze", 2),
+]
+
+
+@pytest.mark.parametrize("PT_profile", ["isotherm", "Madhu"])
+@pytest.mark.parametrize("reference_parameter",
+                         ["R_p_ref", "P_ref", "R_p_ref+P_ref"])
+@pytest.mark.parametrize("offsets_applied",
+                         [None, "single_dataset", "two_datasets", "three_datasets"])
+@pytest.mark.parametrize("error_inflation",
+                         [None, "Line15", "Piette20", "Line15+Piette20"])
+@pytest.mark.parametrize("cloud_case", _CLOUD_CASES)
+def test_assign_free_params_full_v0_grid(PT_profile, reference_parameter,
+                                          offsets_applied, error_inflation,
+                                          cloud_case):
+    """Combinatorial parity over all v0-supported knob combinations.
+
+    8 cloud cases × 2 PT × 3 ref × 4 offsets × 4 err_inflation = 768
+    parametric checks against POSEIDON's reference assign_free_params.
+    """
+    cloud_model, cloud_type, cloud_dim = cloud_case
+    _assert_assign_params_match(dict(
+        param_species=["H2O", "CH4"],
+        bulk_species=["H2", "He"],
+        PT_profile=PT_profile,
+        X_profile="isochem",
+        cloud_model=cloud_model,
+        cloud_type=cloud_type,
+        cloud_dim=cloud_dim,
+        reference_parameter=reference_parameter,
+        offsets_applied=offsets_applied,
+        error_inflation=error_inflation,
+    ))
 
 
 def test_assign_free_params_split_roundtrip_with_canonical_oracle():

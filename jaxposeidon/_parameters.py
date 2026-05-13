@@ -42,7 +42,8 @@ V0_ERROR_INFLATIONS = {None, "Line15", "Piette20", "Line15+Piette20"}
 
 
 def assert_v0_model_config(*, PT_profile, X_profile, cloud_model, cloud_dim,
-                           PT_dim=1, X_dim=1, cloud_type="deck",
+                           PT_dim=1, X_dim=1, Atmosphere_dimension=1,
+                           cloud_type="deck",
                            reference_parameter="R_p_ref",
                            object_type="transiting",
                            gravity_setting="fixed", mass_setting="fixed",
@@ -56,8 +57,20 @@ def assert_v0_model_config(*, PT_profile, X_profile, cloud_model, cloud_dim,
                            species_EM_gradient=(),
                            species_DN_gradient=(),
                            species_vert_gradient=(),
-                           TwoD_type=None, disable_atmosphere=False):
-    """Raise NotImplementedError for any configuration outside the v0 envelope."""
+                           TwoD_type=None, disable_atmosphere=False,
+                           sharp_DN_transition=False,
+                           sharp_EM_transition=False,
+                           PT_penalty=False,
+                           lognormal_logwidth_free=False):
+    """Raise NotImplementedError for any configuration outside the v0 envelope.
+
+    Accepts every primary and secondary tuning knob from POSEIDON's
+    `assign_free_params` so the API surface mirrors POSEIDON's. v0
+    deferrals raise `NotImplementedError` rather than `TypeError`.
+    Tuning kwargs that are inert under the v0 envelope (e.g.
+    `log_P_slope_arr` only matters for Pelletier, which is deferred) are
+    accepted by `assign_free_params` and silently propagated as no-ops.
+    """
     if object_type != "transiting":
         raise NotImplementedError("v0 supports object_type='transiting' only")
     if disable_atmosphere:
@@ -95,6 +108,10 @@ def assert_v0_model_config(*, PT_profile, X_profile, cloud_model, cloud_dim,
         )
     if PT_dim != 1 or X_dim != 1:
         raise NotImplementedError("v0 supports only PT_dim=1, X_dim=1")
+    if Atmosphere_dimension != 1:
+        raise NotImplementedError(
+            f"Atmosphere_dimension={Atmosphere_dimension} != 1; v0 is 1D only"
+        )
     if stellar_contam is not None:
         raise NotImplementedError("Stellar contamination is deferred to v1")
     if offsets_applied not in V0_OFFSETS:
@@ -123,6 +140,27 @@ def assert_v0_model_config(*, PT_profile, X_profile, cloud_model, cloud_dim,
         raise NotImplementedError("v0 forbids per-species chemistry gradients")
     if TwoD_type is not None:
         raise NotImplementedError("v0 forbids TwoD_type")
+    # Atmosphere_dimension=1 ⇒ POSEIDON does not insert geometry params
+    # regardless of sharp_*_transition values. Still, the v0 envelope is
+    # explicitly 1D-only, so we reject non-default sharp-transition flags
+    # to avoid silently accepting a 2D/3D-only tuning knob.
+    if sharp_DN_transition or sharp_EM_transition:
+        raise NotImplementedError(
+            "sharp_DN_transition / sharp_EM_transition only apply to 2D/3D "
+            "atmospheres, which are deferred to v1."
+        )
+    # PT_penalty is only meaningful with PT_profile='Pelletier' (deferred);
+    # reject if set regardless so a caller cannot pass an obsolete flag.
+    if PT_penalty:
+        raise NotImplementedError(
+            "PT_penalty only applies to PT_profile='Pelletier', which is "
+            "deferred to v1."
+        )
+    if lognormal_logwidth_free:
+        raise NotImplementedError(
+            "lognormal_logwidth_free only applies to Mie aerosols, which "
+            "are deferred to v1."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -144,17 +182,31 @@ def assign_free_params(
     error_inflation=None,
     PT_dim=1, X_dim=1, cloud_dim=1,
     TwoD_type=None,
+    TwoD_param_scheme="difference",
     species_EM_gradient=(), species_DN_gradient=(), species_vert_gradient=(),
     Atmosphere_dimension=1,
     opaque_Iceberg=False,
     surface=False,
+    sharp_DN_transition=False,
+    sharp_EM_transition=False,
     reference_parameter="R_p_ref",
     disable_atmosphere=False,
     aerosol_species=(),
+    log_P_slope_arr=(-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0),
+    number_P_knots=0,
+    PT_penalty=False,
     high_res_method=None,
-    surface_model="gray",
+    alpha_high_res_option="log",
+    fix_alpha_high_res=False,
+    fix_W_conv_high_res=False,
+    fix_beta_high_res=True,
+    fix_Delta_phi_high_res=True,
+    lognormal_logwidth_free=False,
     surface_components=(),
+    surface_model="gray",
     surface_percentage_option="linear",
+    thermal=True,
+    reflection=False,
 ):
     """v0 port of POSEIDON.parameters.assign_free_params (parameters.py:12-1154).
 
@@ -170,6 +222,7 @@ def assign_free_params(
         cloud_model=cloud_model, cloud_dim=cloud_dim,
         cloud_type=cloud_type,
         PT_dim=PT_dim, X_dim=X_dim,
+        Atmosphere_dimension=Atmosphere_dimension,
         reference_parameter=reference_parameter,
         object_type=object_type,
         gravity_setting=gravity_setting, mass_setting=mass_setting,
@@ -184,7 +237,18 @@ def assign_free_params(
         species_DN_gradient=species_DN_gradient,
         species_vert_gradient=species_vert_gradient,
         TwoD_type=TwoD_type, disable_atmosphere=disable_atmosphere,
+        sharp_DN_transition=sharp_DN_transition,
+        sharp_EM_transition=sharp_EM_transition,
+        PT_penalty=PT_penalty,
+        lognormal_logwidth_free=lognormal_logwidth_free,
     )
+    # Inert tuning kwargs (only meaningful under deferred branches) are
+    # accepted and ignored; their values do not affect v0 parameter ordering.
+    _ = (TwoD_param_scheme, log_P_slope_arr, number_P_knots,
+         alpha_high_res_option, fix_alpha_high_res, fix_W_conv_high_res,
+         fix_beta_high_res, fix_Delta_phi_high_res,
+         surface_components, surface_percentage_option,
+         thermal, reflection)
 
     params = []
     physical_params = []
