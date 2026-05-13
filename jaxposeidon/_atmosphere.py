@@ -22,6 +22,8 @@ import numpy as np
 import scipy.constants as sc
 from scipy.ndimage import gaussian_filter1d
 
+from jaxposeidon._species_data import masses as _masses, inactive_species as _INACTIVE_SPECIES_LOCAL
+
 
 # ---------------------------------------------------------------------------
 # v0 envelope check for profiles(...)
@@ -241,10 +243,10 @@ def radial_profiles(P, T, g_0, R_p, P_ref, R_p_ref, mu, N_sectors, N_zones):
 # ---------------------------------------------------------------------------
 # Mixing-ratio categorisation
 # ---------------------------------------------------------------------------
-# POSEIDON `supported_chemicals.inactive_species` — duplicated here to keep
-# the v0 port standalone. Kept in sync with
-# `POSEIDON/POSEIDON/supported_chemicals.py:121` (`inactive_species`).
-_INACTIVE_SPECIES = np.array(["H2", "He", "H", "e-", "H-", "N2", "ghost"])
+# POSEIDON `supported_chemicals.inactive_species` — sourced from the local
+# build-time-extracted `_species_data.inactive_species` so the runtime
+# forward path is independent of POSEIDON's importability.
+_INACTIVE_SPECIES = _INACTIVE_SPECIES_LOCAL
 
 
 def mixing_ratio_categories(P, X, N_sectors, N_zones, included_species,
@@ -433,13 +435,12 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
         active_species, CIA_pairs, ff_pairs, bf_species,
     )
 
-    from POSEIDON.species_data import masses as _poseidon_masses
     masses_all = np.zeros(N_species)
     for q in range(N_species):
         sp = included_species[q]
         if sp == "ghost":
             raise NotImplementedError("ghost bulk species deferred to v1")
-        masses_all[q] = _poseidon_masses[sp]
+        masses_all[q] = _masses[sp]
     mu = compute_mean_mol_mass(P, X, N_species, N_sectors, N_zones, masses_all)
 
     if constant_gravity:

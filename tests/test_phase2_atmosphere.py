@@ -446,3 +446,108 @@ def test_profiles_rejects_non_v0(kwargs, err_substring):
     cfg.update(kwargs)
     with pytest.raises(NotImplementedError, match=err_substring):
         _atmosphere.profiles(**cfg)
+
+
+def test_profiles_H_He_bulk():
+    """profiles() parity for H+He bulk."""
+    cfg = _common_atm_args()
+    cfg.update(
+        PT_profile="isotherm", X_profile="isochem",
+        PT_state=np.array([300.0]),
+        log_X_state=np.array([[-3.5, 0.0, 0.0, -3.5]]),
+        included_species=np.array(["H", "He", "H2O"]),
+        bulk_species=np.array(["H", "He"]),
+        param_species=np.array(["H2O"]),
+        active_species=np.array(["H2O"]),
+        CIA_pairs=np.array([], dtype=str),
+        ff_pairs=np.array([], dtype=str),
+        bf_species=np.array([], dtype=str),
+        constant_gravity=True,
+    )
+    _profiles_assert_match(cfg)
+
+
+def test_profiles_single_species_bulk():
+    """profiles() parity for a single non-ghost bulk species (N2)."""
+    cfg = _common_atm_args()
+    cfg.update(
+        PT_profile="isotherm", X_profile="isochem",
+        PT_state=np.array([300.0]),
+        log_X_state=np.array([[-4.0, 0.0, 0.0, -4.0]]),
+        included_species=np.array(["N2", "H2O"]),
+        bulk_species=np.array(["N2"]),
+        param_species=np.array(["H2O"]),
+        active_species=np.array(["H2O"]),
+        CIA_pairs=np.array([], dtype=str),
+        ff_pairs=np.array([], dtype=str),
+        bf_species=np.array([], dtype=str),
+        constant_gravity=True,
+    )
+    _profiles_assert_match(cfg)
+
+
+def test_profiles_rejects_T_input():
+    """profiles() with T_input != None must raise NotImplementedError."""
+    cfg = _common_atm_args()
+    cfg.update(
+        PT_profile="isotherm", X_profile="isochem",
+        PT_state=np.array([1000.0]),
+        log_X_state=np.zeros((0, 4)),
+        included_species=np.array(["H2"]),
+        bulk_species=np.array(["H2"]),
+        param_species=np.array([], dtype=str),
+        active_species=np.array([], dtype=str),
+        CIA_pairs=np.array([], dtype=str),
+        ff_pairs=np.array([], dtype=str),
+        bf_species=np.array([], dtype=str),
+        T_input=np.zeros((50, 1, 1)),
+    )
+    with pytest.raises(NotImplementedError, match="file_read"):
+        _atmosphere.profiles(**cfg)
+
+
+def test_profiles_rejects_chemistry_grid():
+    """profiles() with chemistry_grid != None must raise NotImplementedError."""
+    cfg = _common_atm_args()
+    cfg.update(
+        PT_profile="isotherm", X_profile="isochem",
+        PT_state=np.array([1000.0]),
+        log_X_state=np.zeros((0, 4)),
+        included_species=np.array(["H2"]),
+        bulk_species=np.array(["H2"]),
+        param_species=np.array([], dtype=str),
+        active_species=np.array([], dtype=str),
+        CIA_pairs=np.array([], dtype=str),
+        ff_pairs=np.array([], dtype=str),
+        bf_species=np.array([], dtype=str),
+        chemistry_grid={"dummy": True},
+    )
+    with pytest.raises(NotImplementedError, match="chem_eq"):
+        _atmosphere.profiles(**cfg)
+
+
+def test_chemistry_stub_module_imports_and_raises():
+    """_chemistry.py is a v0 stub — equilibrium chemistry entry points raise."""
+    from jaxposeidon import _chemistry
+    with pytest.raises(NotImplementedError, match="chem_eq|FastChem|Equilibrium"):
+        _chemistry.interpolate_log_X_grid()
+    with pytest.raises(NotImplementedError):
+        _chemistry.load_chemistry_grid()
+
+
+def test_species_data_masses_local_table():
+    """_species_data.masses contains every species we use in v0 tests."""
+    from jaxposeidon._species_data import masses, inactive_species
+    for sp in ("H2", "He", "H", "N2", "H2O", "CH4", "CO2", "CO", "NH3",
+               "HCN", "OCS", "N2O", "CH3Cl", "CS2", "C2H6S"):
+        assert sp in masses, f"missing mass for {sp}"
+    # Confirm inactive_species mirrors POSEIDON
+    from POSEIDON.supported_chemicals import inactive_species as p_inactive
+    np.testing.assert_array_equal(inactive_species, p_inactive)
+    # Mass values match POSEIDON
+    from POSEIDON.species_data import masses as p_masses
+    for sp in masses:
+        if sp in p_masses:
+            assert masses[sp] == p_masses[sp], (
+                f"mass mismatch for {sp}: {masses[sp]} vs {p_masses[sp]}"
+            )
