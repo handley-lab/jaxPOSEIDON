@@ -169,6 +169,12 @@ def test_v0_config_accepts_k2_18b_one_offset():
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           surface_model="constant"), "surface_model='gray'"),
+    (dict(PT_profile="isotherm", X_profile="isochem",
+          cloud_model="cloud-free", cloud_dim=1,
+          cloud_type="haze"), "cloud-free"),
+    (dict(PT_profile="isotherm", X_profile="isochem",
+          cloud_model="cloud-free", cloud_dim=1,
+          cloud_type="nonsense"), "cloud-free"),
 ])
 def test_v0_config_rejects_out_of_scope(kwargs, err_substring):
     """Non-v0 configurations raise NotImplementedError with descriptive message."""

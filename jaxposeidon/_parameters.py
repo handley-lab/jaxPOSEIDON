@@ -106,6 +106,12 @@ def assert_v0_model_config(*, PT_profile, X_profile, cloud_model, cloud_dim,
         raise NotImplementedError(
             f"cloud_type={cloud_type!r} not in v0 ({sorted(V0_CLOUD_TYPES)})"
         )
+    if cloud_model == "cloud-free" and cloud_type != "deck":
+        raise NotImplementedError(
+            f"cloud_type={cloud_type!r} ignored by cloud-free models in "
+            "POSEIDON; v0 requires the inert default cloud_type='deck' so "
+            "the accepted API surface matches the documented envelope."
+        )
     if PT_dim != 1 or X_dim != 1:
         raise NotImplementedError("v0 supports only PT_dim=1, X_dim=1")
     if Atmosphere_dimension != 1:
