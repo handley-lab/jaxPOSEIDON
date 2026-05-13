@@ -86,10 +86,15 @@ def unpack_MacMad17_cloud_params(*, clouds_in, cloud_param_names,
         else:
             f_cloud, phi_0, theta_0 = 0.0, -90.0, 90.0
 
+    # P_cloud is returned as a scalar matching POSEIDON's
+    # `unpack_cloud_params` contract. The caller (compute_spectrum /
+    # core.py:1668-1669) is responsible for wrapping it in a length-1
+    # ndarray before passing to `extinction(...)` which indexes
+    # `P_cloud[0]`.
     return dict(
-        a=a, gamma=gamma,
-        P_cloud=np.array([P_cloud]),  # POSEIDON wraps scalar in length-1 array
-        kappa_cloud_0=kappa_cloud_0,
-        f_cloud=f_cloud, phi_0=phi_0, theta_0=theta_0,
+        a=float(a), gamma=float(gamma),
+        P_cloud=float(P_cloud),
+        kappa_cloud_0=float(kappa_cloud_0),
+        f_cloud=float(f_cloud), phi_0=float(phi_0), theta_0=float(theta_0),
         enable_haze=enable_haze, enable_deck=enable_deck,
     )
