@@ -53,13 +53,9 @@ def extinction(chemical_species, active_species, cia_pairs, ff_pairs, bf_species
     kappa_gas = np.zeros((N_layers, N_sectors, N_zones, N_wl))
     kappa_Ray = np.zeros((N_layers, N_sectors, N_zones, N_wl))
     kappa_cloud = np.zeros((N_layers, N_sectors, N_zones, N_wl))
-    kappa_cloud_separate = np.zeros((max(len(n_aerosol_array), 1),
-                                      N_layers, N_sectors, N_zones, N_wl))
-    # POSEIDON allocates `kappa_cloud_separate` with shape
-    # `(len(n_aerosol_array), ...)`; preserve that. If empty, give it
-    # 1 row so the dtype is still (5D), matching the return contract.
-    if len(n_aerosol_array) == 0:
-        kappa_cloud_separate = np.zeros((1, N_layers, N_sectors, N_zones, N_wl))
+    kappa_cloud_separate = np.zeros(
+        (len(n_aerosol_array), N_layers, N_sectors, N_zones, N_wl)
+    )
 
     N_T_fine = len(T_fine)
     N_P_fine = len(log_P_fine)

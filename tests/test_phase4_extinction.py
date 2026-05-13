@@ -74,11 +74,8 @@ def test_extinction_matches_poseidon(enable_haze, enable_deck):
         cfg["P_surf"], cfg["enable_Mie"], cfg["n_aerosol_array"],
         cfg["sigma_Mie_array"], cfg["P_deep"],
     )
-    # POSEIDON returns kappa_cloud_separate with shape based on
-    # len(n_aerosol_array). When that's empty, both POSEIDON and our port
-    # may return shape (0,...) and shape (1,...) respectively due to the
-    # safety-allocation difference. Compare only the first 3 outputs.
-    for a, b in zip(ours[:3], theirs[:3]):
+    # Compare all four outputs.
+    for a, b in zip(ours, theirs):
         np.testing.assert_allclose(a, b, atol=0, rtol=0)
 
 
@@ -99,5 +96,12 @@ def test_extinction_rejects_Mie():
 def test_extinction_rejects_ff():
     cfg = _set_up_extinction()
     cfg["ff_pairs"] = np.array(["H-ff"])
+    with pytest.raises(NotImplementedError, match="H-minus"):
+        extinction(**cfg)
+
+
+def test_extinction_rejects_bf():
+    cfg = _set_up_extinction()
+    cfg["bf_species"] = np.array(["H-bf"])
     with pytest.raises(NotImplementedError, match="H-minus"):
         extinction(**cfg)
