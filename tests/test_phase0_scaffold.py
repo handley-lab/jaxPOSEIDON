@@ -75,17 +75,26 @@ def test_k2_18b_species_in_opacity_hdf5(poseidon_input_data):
                 )
 
 
-def test_paired_oracle_harness_shape():
+def test_paired_oracle_harness_shape(monkeypatch):
     """tests/oracle.paired_transmission_spectra wires both sides correctly.
 
     Phase 0 stubs the JAX side with a NotImplementedError-raising callable;
     the harness must propagate that without swallowing it. Each subsequent
     phase will replace the stub with progressively more port code.
+
+    Uses monkeypatch to stub POSEIDON's side too, so this test does not
+    require POSEIDON_input_data or the CIA HDF5 — it only verifies the
+    paired-harness control flow.
     """
-    from tests.oracle import paired_transmission_spectra
+    from tests import oracle
+
+    monkeypatch.setattr(oracle, "canonical_rayleigh_config",
+                        lambda: {"wl": [0.0]})
+    monkeypatch.setattr(oracle, "poseidon_transmission_spectrum",
+                        lambda cfg: [0.0])
 
     def jax_stub(cfg):
         raise NotImplementedError("jaxposeidon forward model: Phase 1+")
 
     with pytest.raises(NotImplementedError):
-        paired_transmission_spectra(jax_stub)
+        oracle.paired_transmission_spectra(jax_stub)

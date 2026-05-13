@@ -69,6 +69,9 @@ def canonical_rayleigh_config():
         model, wl, "opacity_sampling", T_fine, log_P_fine,
         testing=True,
     )
+    # Mirror POSEIDON/tests/test_TRIDENT.py:96-97 — zero CIA so the oracle is
+    # a pure-H2 Rayleigh-scattering atmosphere as the test expects.
+    opac["CIA_stored"] *= 0.0
 
     return dict(
         star=star, planet=planet, model=model,
