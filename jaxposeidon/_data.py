@@ -32,7 +32,7 @@ def apply_offsets(ydata, offset_params, offsets_applied,
         return ydata
     ydata_adjusted = ydata.copy()
     if offsets_applied == "single_dataset":
-        if offset_1_start == 0:
+        if np.isscalar(offset_1_start) and offset_1_start == 0:
             ydata_adjusted[offset_start:offset_end] -= offset_params[0] * 1e-6
         else:
             for n in range(len(offset_1_start)):
@@ -40,7 +40,7 @@ def apply_offsets(ydata, offset_params, offsets_applied,
                     offset_params[0] * 1e-6
                 )
     elif offsets_applied == "two_datasets":
-        if offset_1_start == 0:
+        if np.isscalar(offset_1_start) and offset_1_start == 0:
             ydata_adjusted[offset_start[0]:offset_end[0]] -= offset_params[0] * 1e-6
             ydata_adjusted[offset_start[1]:offset_end[1]] -= offset_params[1] * 1e-6
         else:
@@ -53,7 +53,7 @@ def apply_offsets(ydata, offset_params, offsets_applied,
                     offset_params[1] * 1e-6
                 )
     elif offsets_applied == "three_datasets":
-        if offset_1_start == 0:
+        if np.isscalar(offset_1_start) and offset_1_start == 0:
             ydata_adjusted[offset_start[0]:offset_end[0]] -= offset_params[0] * 1e-6
             ydata_adjusted[offset_start[1]:offset_end[1]] -= offset_params[1] * 1e-6
             ydata_adjusted[offset_start[2]:offset_end[2]] -= offset_params[2] * 1e-6

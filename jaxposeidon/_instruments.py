@@ -12,7 +12,10 @@ them to `make_model_data` here.
 
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
-from numpy import trapz
+try:
+    from numpy import trapezoid as trapz
+except ImportError:
+    from numpy import trapz
 
 
 def compute_instrument_indices(wl, wl_data, half_width, sensitivity, fwhm_um):

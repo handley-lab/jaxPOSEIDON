@@ -5,6 +5,8 @@ import pytest
 
 from jaxposeidon import _data, _instruments
 
+_trapz = getattr(np, "trapezoid", getattr(np, "trapz", None))
+
 
 def test_make_model_data_matches_poseidon():
     from POSEIDON.instrument import make_model_data as p_mmd
@@ -150,11 +152,11 @@ def test_bin_spectrum_to_data_matches_poseidon():
     sens_a = rng.uniform(0.1, 1.0, size=N_wl)
     sens_b = rng.uniform(0.1, 1.0, size=N_wl)
     norm_a = np.array([
-        np.trapz(sens_a[bl_a[i]:br_a[i]], wl[bl_a[i]:br_a[i]])
+        _trapz(sens_a[bl_a[i]:br_a[i]], wl[bl_a[i]:br_a[i]])
         for i in range(N_bins_a)
     ])
     norm_b = np.array([
-        np.trapz(sens_b[bl_b[i]:br_b[i]], wl[bl_b[i]:br_b[i]])
+        _trapz(sens_b[bl_b[i]:br_b[i]], wl[bl_b[i]:br_b[i]])
         for i in range(N_bins_b)
     ])
     sigma_a = np.full(N_bins_a, 1.2)
@@ -273,3 +275,112 @@ def test_loglikelihood_with_offset_and_inflation():
     norm_log = (-0.5 * np.log(2.0 * np.pi * err_eff_sq)).sum()
     chi2 = (-0.5 * (ymodel - ydata_adj) ** 2 / err_eff_sq).sum()
     np.testing.assert_allclose(ll, chi2 + norm_log, atol=0)
+
+
+def test_apply_offsets_two_datasets_lumped():
+    ydata = np.arange(20, dtype=float) * 1e-3
+    out = _data.apply_offsets(
+        ydata, np.array([100.0, -50.0]),
+        offsets_applied="two_datasets",
+        offset_start=0, offset_end=0,
+        offset_1_start=np.array([0, 10]), offset_1_end=np.array([3, 13]),
+        offset_2_start=np.array([5, 15]), offset_2_end=np.array([8, 18]),
+    )
+    expected = ydata.copy()
+    expected[0:3] -= 100.0 * 1e-6
+    expected[10:13] -= 100.0 * 1e-6
+    expected[5:8] -= -50.0 * 1e-6
+    expected[15:18] -= -50.0 * 1e-6
+    np.testing.assert_array_equal(out, expected)
+
+
+def test_apply_offsets_three_datasets_lumped():
+    ydata = np.arange(30, dtype=float) * 1e-3
+    out = _data.apply_offsets(
+        ydata, np.array([100.0, -50.0, 30.0]),
+        offsets_applied="three_datasets",
+        offset_start=0, offset_end=0,
+        offset_1_start=np.array([0, 10]), offset_1_end=np.array([3, 13]),
+        offset_2_start=np.array([5, 15]), offset_2_end=np.array([8, 18]),
+        offset_3_start=np.array([20, 25]), offset_3_end=np.array([23, 28]),
+    )
+    expected = ydata.copy()
+    expected[0:3] -= 100.0 * 1e-6
+    expected[10:13] -= 100.0 * 1e-6
+    expected[5:8] -= -50.0 * 1e-6
+    expected[15:18] -= -50.0 * 1e-6
+    expected[20:23] -= 30.0 * 1e-6
+    expected[25:28] -= 30.0 * 1e-6
+    np.testing.assert_array_equal(out, expected)
+
+
+def test_compute_instrument_indices_matches_poseidon():
+    """Reference-data-independent slice of POSEIDON's init_instrument."""
+    rng = np.random.default_rng(3)
+    N_wl, N_bins = 600, 15
+    wl = np.linspace(1.0, 5.0, N_wl)
+    wl_data = np.linspace(1.5, 4.5, N_bins)
+    half_width = np.full(N_bins, 0.04)
+    sensitivity = rng.uniform(0.1, 1.0, size=N_wl)
+    fwhm_um = np.full(N_bins, 0.02)
+    sigma, bl, bc, br, norm = _instruments.compute_instrument_indices(
+        wl, wl_data, half_width, sensitivity, fwhm_um,
+    )
+    # POSEIDON reference computation
+    p_bl = np.zeros(N_bins, dtype=np.int64)
+    p_bc = np.zeros(N_bins, dtype=np.int64)
+    p_br = np.zeros(N_bins, dtype=np.int64)
+    p_sig = np.zeros(N_bins)
+    p_norm = np.zeros(N_bins)
+    sigma_um = 0.424661 * fwhm_um
+    for n in range(N_bins):
+        p_bl[n] = int(np.argmin(np.abs(wl - (wl_data[n] - half_width[n]))))
+        p_bc[n] = int(np.argmin(np.abs(wl - wl_data[n])))
+        p_br[n] = int(np.argmin(np.abs(wl - (wl_data[n] + half_width[n]))))
+        dwl = 0.5 * (wl[p_bc[n] + 1] - wl[p_bc[n] - 1])
+        p_sig[n] = sigma_um[n] / dwl
+        p_norm[n] = _trapz(
+            sensitivity[p_bl[n]:p_br[n]], wl[p_bl[n]:p_br[n]],
+        )
+    np.testing.assert_array_equal(bl, p_bl)
+    np.testing.assert_array_equal(bc, p_bc)
+    np.testing.assert_array_equal(br, p_br)
+    np.testing.assert_array_equal(sigma, p_sig)
+    np.testing.assert_array_equal(norm, p_norm)
+
+
+def test_loglikelihood_matches_poseidon_oracle_combined():
+    """End-to-end likelihood vs hand-coded POSEIDON expression.
+
+    Mirrors POSEIDON retrieval.py:1087-1183: offsets applied, Line15
+    inflation, full Gaussian normalisation, plus ln_prior_TP additive.
+    """
+    rng = np.random.default_rng(17)
+    n = 24
+    ydata = rng.uniform(2.5e-3, 3.0e-3, size=n)
+    ymodel = ydata + rng.normal(0, 5e-5, size=n)
+    err_data = rng.uniform(8e-5, 2e-4, size=n)
+    offset_params = np.array([75.0, -40.0])
+    err_inflation_params = np.array([-8.5, 0.2])
+    ln_prior_TP = -1.234
+    ll = _data.loglikelihood(
+        ymodel, ydata, err_data,
+        offset_params=offset_params,
+        err_inflation_params=err_inflation_params,
+        offsets_applied="two_datasets",
+        error_inflation="Line15+Piette20",
+        offset_start=[0, n // 2], offset_end=[n // 2, n],
+        ln_prior_TP=ln_prior_TP,
+    )
+    # POSEIDON-style hand computation
+    ydata_adj = ydata.copy()
+    ydata_adj[0:n // 2] -= offset_params[0] * 1e-6
+    ydata_adj[n // 2:n] -= offset_params[1] * 1e-6
+    err_eff_sq = (
+        err_data ** 2
+        + 10.0 ** err_inflation_params[0]
+        + (err_inflation_params[1] * ymodel) ** 2
+    )
+    norm_log = (-0.5 * np.log(2.0 * np.pi * err_eff_sq)).sum()
+    chi2 = (-0.5 * (ymodel - ydata_adj) ** 2 / err_eff_sq).sum()
+    np.testing.assert_allclose(ll, chi2 + norm_log + ln_prior_TP, atol=0)
