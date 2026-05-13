@@ -1,4 +1,321 @@
-"""_parameters — phase-0 stub. See ~/.claude/plans/let-s-get-going-shimmering-parnas.md."""
+"""Parameter/state layer — v0 branches.
 
-# Implementation deferred to its phase. POSEIDON source mapping is documented
-# in the plan file.
+Faithful port of the v0-relevant branches of POSEIDON's
+`parameters.py:assign_free_params` (lines 12-1154) and `split_params`
+(lines 1157-1224). v0 envelope:
+    - object_type='transiting'
+    - disable_atmosphere=False
+    - reference_parameter in {'R_p_ref', 'P_ref', 'R_p_ref+P_ref'}
+    - gravity_setting='fixed', mass_setting='fixed', bulk_species without
+      'ghost'
+    - PT_profile in {'isotherm', 'Madhu'}, PT_dim=1
+    - X_profile='isochem', X_dim=1, no species-wise gradients
+    - cloud_model in {'cloud-free', 'MacMad17'},
+      cloud_type in {'deck', 'haze', 'deck_haze'} (no shiny),
+      cloud_dim in {1, 2}
+    - stellar_contam=None
+    - offsets_applied in {None, 'single_dataset', 'two_datasets',
+      'three_datasets'}
+    - error_inflation in {None, 'Line15', 'Piette20', 'Line15+Piette20'}
+    - high_res_method=None
+    - surface=False, surface_model='gray'
+
+Any other configuration raises NotImplementedError. Subsequent phases
+relax these checks; v0 is the minimum needed for the canonical Rayleigh
+oracle and for the K2-18b one-offset retrieval.
+"""
+
+import numpy as np
+
+
+# ---------------------------------------------------------------------------
+# v0 configuration whitelist
+# ---------------------------------------------------------------------------
+V0_PT_PROFILES = {"isotherm", "Madhu"}
+V0_X_PROFILES = {"isochem"}
+V0_CLOUD_MODELS = {"cloud-free", "MacMad17"}
+V0_CLOUD_TYPES = {"deck", "haze", "deck_haze"}
+V0_CLOUD_DIMS = {1, 2}
+V0_REFERENCE_PARAMETERS = {"R_p_ref", "P_ref", "R_p_ref+P_ref"}
+V0_OFFSETS = {None, "single_dataset", "two_datasets", "three_datasets"}
+V0_ERROR_INFLATIONS = {None, "Line15", "Piette20", "Line15+Piette20"}
+
+
+def assert_v0_model_config(*, PT_profile, X_profile, cloud_model, cloud_dim,
+                           PT_dim=1, X_dim=1, cloud_type="deck",
+                           reference_parameter="R_p_ref",
+                           object_type="transiting",
+                           gravity_setting="fixed", mass_setting="fixed",
+                           bulk_species=("H2",),
+                           stellar_contam=None,
+                           offsets_applied=None,
+                           error_inflation=None,
+                           surface=False, surface_model="gray",
+                           high_res_method=None,
+                           opaque_Iceberg=False, aerosol_species=(),
+                           species_EM_gradient=(),
+                           species_DN_gradient=(),
+                           species_vert_gradient=(),
+                           TwoD_type=None, disable_atmosphere=False):
+    """Raise NotImplementedError for any configuration outside the v0 envelope."""
+    if object_type != "transiting":
+        raise NotImplementedError("v0 supports object_type='transiting' only")
+    if disable_atmosphere:
+        raise NotImplementedError("v0 does not support disable_atmosphere=True")
+    if reference_parameter not in V0_REFERENCE_PARAMETERS:
+        raise NotImplementedError(
+            f"reference_parameter={reference_parameter!r} not in v0 "
+            f"({sorted(V0_REFERENCE_PARAMETERS)})"
+        )
+    if gravity_setting != "fixed":
+        raise NotImplementedError("v0 requires gravity_setting='fixed'")
+    if mass_setting != "fixed":
+        raise NotImplementedError("v0 requires mass_setting='fixed'")
+    if "ghost" in bulk_species:
+        raise NotImplementedError("v0 does not support 'ghost' bulk species")
+    if PT_profile not in V0_PT_PROFILES:
+        raise NotImplementedError(
+            f"PT_profile={PT_profile!r} not in v0 ({sorted(V0_PT_PROFILES)})"
+        )
+    if X_profile not in V0_X_PROFILES:
+        raise NotImplementedError(
+            f"X_profile={X_profile!r} not in v0 ({sorted(V0_X_PROFILES)})"
+        )
+    if cloud_model not in V0_CLOUD_MODELS:
+        raise NotImplementedError(
+            f"cloud_model={cloud_model!r} not in v0 ({sorted(V0_CLOUD_MODELS)})"
+        )
+    if cloud_dim not in V0_CLOUD_DIMS:
+        raise NotImplementedError(
+            f"cloud_dim={cloud_dim!r} not in v0 ({sorted(V0_CLOUD_DIMS)})"
+        )
+    if cloud_model == "MacMad17" and cloud_type not in V0_CLOUD_TYPES:
+        raise NotImplementedError(
+            f"cloud_type={cloud_type!r} not in v0 ({sorted(V0_CLOUD_TYPES)})"
+        )
+    if PT_dim != 1 or X_dim != 1:
+        raise NotImplementedError("v0 supports only PT_dim=1, X_dim=1")
+    if stellar_contam is not None:
+        raise NotImplementedError("Stellar contamination is deferred to v1")
+    if offsets_applied not in V0_OFFSETS:
+        raise NotImplementedError(
+            f"offsets_applied={offsets_applied!r} not in v0 "
+            f"({sorted(o for o in V0_OFFSETS if o is not None) + [None]})"
+        )
+    if error_inflation not in V0_ERROR_INFLATIONS:
+        raise NotImplementedError(
+            f"error_inflation={error_inflation!r} not in v0"
+        )
+    if surface:
+        raise NotImplementedError("Surfaces are deferred to v1")
+    if surface_model not in ("gray", "constant", "lab_data"):
+        raise NotImplementedError(
+            f"surface_model={surface_model!r} not a known POSEIDON option"
+        )
+    if surface_model != "gray":
+        raise NotImplementedError("v0 supports only surface_model='gray'")
+    if high_res_method is not None:
+        raise NotImplementedError("High-resolution mode is deferred to v1")
+    if opaque_Iceberg or list(aerosol_species):
+        raise NotImplementedError("Iceberg/Mie aerosols are deferred to v1")
+    if (list(species_EM_gradient) or list(species_DN_gradient)
+            or list(species_vert_gradient)):
+        raise NotImplementedError("v0 forbids per-species chemistry gradients")
+    if TwoD_type is not None:
+        raise NotImplementedError("v0 forbids TwoD_type")
+
+
+# ---------------------------------------------------------------------------
+# assign_free_params — v0 branches
+# ---------------------------------------------------------------------------
+def assign_free_params(
+    *,
+    param_species,
+    bulk_species=("H2",),
+    object_type="transiting",
+    PT_profile,
+    X_profile,
+    cloud_model,
+    cloud_type="deck",
+    gravity_setting="fixed",
+    mass_setting="fixed",
+    stellar_contam=None,
+    offsets_applied=None,
+    error_inflation=None,
+    PT_dim=1, X_dim=1, cloud_dim=1,
+    TwoD_type=None,
+    species_EM_gradient=(), species_DN_gradient=(), species_vert_gradient=(),
+    Atmosphere_dimension=1,
+    opaque_Iceberg=False,
+    surface=False,
+    reference_parameter="R_p_ref",
+    disable_atmosphere=False,
+    aerosol_species=(),
+    high_res_method=None,
+    surface_model="gray",
+    surface_components=(),
+    surface_percentage_option="linear",
+):
+    """v0 port of POSEIDON.parameters.assign_free_params (parameters.py:12-1154).
+
+    Mirrors the parameter-ordering conventions of POSEIDON exactly for the
+    v0 configuration envelope (see `assert_v0_model_config`). Returns the
+    same tuple shape as POSEIDON's function:
+        (params, physical_params, PT_params, X_params, cloud_params,
+         geometry_params, stellar_params, high_res_params, surface_params,
+         N_params_cumulative)
+    """
+    assert_v0_model_config(
+        PT_profile=PT_profile, X_profile=X_profile,
+        cloud_model=cloud_model, cloud_dim=cloud_dim,
+        cloud_type=cloud_type,
+        PT_dim=PT_dim, X_dim=X_dim,
+        reference_parameter=reference_parameter,
+        object_type=object_type,
+        gravity_setting=gravity_setting, mass_setting=mass_setting,
+        bulk_species=bulk_species,
+        stellar_contam=stellar_contam,
+        offsets_applied=offsets_applied,
+        error_inflation=error_inflation,
+        surface=surface, surface_model=surface_model,
+        high_res_method=high_res_method,
+        opaque_Iceberg=opaque_Iceberg, aerosol_species=aerosol_species,
+        species_EM_gradient=species_EM_gradient,
+        species_DN_gradient=species_DN_gradient,
+        species_vert_gradient=species_vert_gradient,
+        TwoD_type=TwoD_type, disable_atmosphere=disable_atmosphere,
+    )
+
+    params = []
+    physical_params = []
+    PT_params = []
+    X_params = []
+    cloud_params = []
+    geometry_params = []
+    stellar_params = []  # always empty in v0
+    high_res_params = []  # always empty in v0
+    surface_params = []
+
+    # Physical parameters (POSEIDON parameters.py:262-289)
+    if reference_parameter == "R_p_ref":
+        physical_params += ["R_p_ref"]
+    elif reference_parameter == "P_ref":
+        physical_params += ["log_P_ref"]
+    elif reference_parameter == "R_p_ref+P_ref":
+        physical_params += ["R_p_ref", "log_P_ref"]
+
+    N_physical_params = len(physical_params)
+    params += physical_params
+
+    # PT parameters (parameters.py:322-349, 1D only)
+    if PT_profile == "isotherm":
+        PT_params += ["T"]
+    elif PT_profile == "Madhu":
+        PT_params += ["a1", "a2", "log_P1", "log_P2", "log_P3", "T_ref"]
+    N_PT_params = len(PT_params)
+    params += PT_params
+
+    # X parameters (parameters.py:436-454, 1D isochem only)
+    for species in param_species:
+        X_params += ["log_" + species]
+    N_species_params = len(X_params)
+    params += X_params
+
+    # Cloud parameters (parameters.py:719-743, MacMad17)
+    if cloud_model == "cloud-free":
+        cloud_params = []
+    elif cloud_model == "MacMad17":
+        if "haze" in cloud_type:
+            cloud_params += ["log_a", "gamma"]
+        if "deck" in cloud_type:
+            cloud_params += ["log_P_cloud"]
+        if cloud_dim == 2:
+            cloud_params += ["phi_cloud"]
+    N_cloud_params = len(cloud_params)
+    params += cloud_params
+
+    # Geometry parameters (parameters.py:995-1009, Atmosphere_dimension=1 ⇒ empty)
+    N_geometry_params = 0  # 1D atmosphere: no alpha/beta
+
+    # Stellar parameters (parameters.py:1016-1031): always empty in v0
+    N_stellar_params = 0
+
+    # Offsets (parameters.py:1035-1047)
+    if offsets_applied is None:
+        N_offset_params = 0
+    elif offsets_applied == "single_dataset":
+        params += ["delta_rel"]
+        N_offset_params = 1
+    elif offsets_applied == "two_datasets":
+        params += ["delta_rel_1", "delta_rel_2"]
+        N_offset_params = 2
+    elif offsets_applied == "three_datasets":
+        params += ["delta_rel_1", "delta_rel_2", "delta_rel_3"]
+        N_offset_params = 3
+
+    # Error inflation (parameters.py:1051-1064)
+    if error_inflation is None:
+        N_error_params = 0
+    elif error_inflation == "Line15":
+        params += ["b"]
+        N_error_params = 1
+    elif error_inflation == "Piette20":
+        params += ["x_tol"]
+        N_error_params = 1
+    elif error_inflation == "Line15+Piette20":
+        params += ["b", "x_tol"]
+        N_error_params = 2
+
+    # High-resolution (always empty in v0)
+    N_high_res_params = 0
+
+    # Surface (parameters.py:1101-1124, gray surface_model only)
+    # surface=False in v0 ⇒ surface_params stays []
+    N_surface_params = len(surface_params)
+    params += surface_params
+
+    # Convert to numpy arrays
+    params = np.array(params)
+    physical_params = np.array(physical_params)
+    PT_params = np.array(PT_params)
+    X_params = np.array(X_params)
+    cloud_params = np.array(cloud_params)
+    geometry_params = np.array(geometry_params)
+    stellar_params = np.array(stellar_params)
+    high_res_params = np.array(high_res_params)
+    surface_params = np.array(surface_params)
+
+    N_params_cumulative = np.cumsum([
+        N_physical_params, N_PT_params, N_species_params, N_cloud_params,
+        N_geometry_params, N_stellar_params, N_offset_params, N_error_params,
+        N_high_res_params, N_surface_params,
+    ])
+
+    return (params, physical_params, PT_params, X_params, cloud_params,
+            geometry_params, stellar_params, high_res_params, surface_params,
+            N_params_cumulative)
+
+
+# ---------------------------------------------------------------------------
+# split_params — exact port (parameters.py:1157-1224)
+# ---------------------------------------------------------------------------
+def split_params(params_drawn, N_params_cumulative):
+    """Split a flat parameter vector into POSEIDON's typed groups.
+
+    Returns ten arrays in POSEIDON's canonical order:
+        physical_drawn, PT_drawn, log_X_drawn, clouds_drawn, geometry_drawn,
+        stellar_drawn, offsets_drawn, err_inflation_drawn, high_res_drawn,
+        surface_drawn.
+    """
+    return (
+        params_drawn[0:N_params_cumulative[0]],
+        params_drawn[N_params_cumulative[0]:N_params_cumulative[1]],
+        params_drawn[N_params_cumulative[1]:N_params_cumulative[2]],
+        params_drawn[N_params_cumulative[2]:N_params_cumulative[3]],
+        params_drawn[N_params_cumulative[3]:N_params_cumulative[4]],
+        params_drawn[N_params_cumulative[4]:N_params_cumulative[5]],
+        params_drawn[N_params_cumulative[5]:N_params_cumulative[6]],
+        params_drawn[N_params_cumulative[6]:N_params_cumulative[7]],
+        params_drawn[N_params_cumulative[7]:N_params_cumulative[8]],
+        params_drawn[N_params_cumulative[8]:N_params_cumulative[9]],
+    )
