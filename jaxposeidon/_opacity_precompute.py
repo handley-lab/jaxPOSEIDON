@@ -96,11 +96,19 @@ def P_interpolate_wl_initialise_sigma(N_P_fine, N_T, N_P, N_wl, log_sigma,
     for k in range(N_nu):
         if wl_interp == "sample":
             z = closest_index(nu_model[k], nu_opac[0], nu_opac[-1], N_nu_opac)
+            c1 = c2 = 0.0  # unused
         else:  # 'linear'
             z = prior_index_V2(nu_model[k], nu_opac[0], nu_opac[-1], N_nu_opac)
-            w_nu = (nu_model[k] - nu_opac[z]) / (nu_opac[z + 1] - nu_opac[z])
-            c1 = 1.0 - w_nu
-            c2 = w_nu
+            # Guard z+1 indexing: out-of-range branches below produce zeros
+            # without ever reading nu_opac[z+1]. Mirrors POSEIDON's intended
+            # semantics but is explicit in numpy (numba tolerated the
+            # out-of-bounds read because it never executed).
+            if (z == 0) or (z == (N_nu_opac - 1)):
+                c1 = c2 = 0.0
+            else:
+                w_nu = (nu_model[k] - nu_opac[z]) / (nu_opac[z + 1] - nu_opac[z])
+                c1 = 1.0 - w_nu
+                c2 = w_nu
 
         for i in range(N_P_fine):
             for j in range(N_T):
@@ -153,11 +161,15 @@ def wl_initialise_cia(N_T_cia, N_wl, log_cia, nu_model, nu_cia, N_nu,
     for k in range(N_nu):
         if wl_interp == "sample":
             z = closest_index(nu_model[k], nu_cia[0], nu_cia[-1], N_nu_cia)
+            c1 = c2 = 0.0
         else:
             z = prior_index_V2(nu_model[k], nu_cia[0], nu_cia[-1], N_nu_cia)
-            w_nu = (nu_model[k] - nu_cia[z]) / (nu_cia[z + 1] - nu_cia[z])
-            c1 = 1.0 - w_nu
-            c2 = w_nu
+            if (z == 0) or (z == (N_nu_cia - 1)):
+                c1 = c2 = 0.0
+            else:
+                w_nu = (nu_model[k] - nu_cia[z]) / (nu_cia[z + 1] - nu_cia[z])
+                c1 = 1.0 - w_nu
+                c2 = w_nu
 
         for i in range(N_T_cia):
             if (z == 0) or (z == (N_nu_cia - 1)):
