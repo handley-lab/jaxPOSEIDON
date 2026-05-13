@@ -1,11 +1,24 @@
 """TRIDENT transmission radiative transfer — v0 port.
 
-Faithful port of POSEIDON's `transmission.py:12-944` for the v0 envelope:
+Faithful **numpy** port of POSEIDON's `transmission.py:12-944` for the
+v0 envelope:
 
 - 1D background atmosphere (`N_sectors_back == 1`, `N_zones_back == 1`)
 - MacMad17 deck + haze, optionally `cloud_dim=2` patchy (handled via
   TRIDENT's sector/zone splitting machinery)
 - Beer-Lambert chord transmission via tensor products
+
+**v0 deferral**: the implementation uses numpy + python for-loops with
+data-dependent control flow (sector caching, irregular cloud-boundary
+splitting) that does not map cleanly onto `jax.numpy` + `lax`. Bit-exact
+POSEIDON parity is the v0 goal; full JAX-tracing (jit, vmap, grad) is
+v1 work. The intended Phase 10 BlackJAX NSS sampler does not require
+JAX-tracing through `TRIDENT` — it can call the numpy implementation
+through a `jax.experimental.io_callback` boundary, exactly like
+POSEIDON's PyMultiNest integration calls numpy/numba. HMC/VI users
+will need the v1 JAX-traced reimplementation, which is a substantive
+rewrite of `extend_rad_transfer_grids`, `path_distribution_geometric`,
+and `compute_tau_vert` into `lax.cond`/`lax.fori_loop` form.
 
 Source mapping per function:
     zone_boundaries                — transmission.py:12-83
