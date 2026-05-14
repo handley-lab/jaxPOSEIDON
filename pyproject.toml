@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jaxposeidon"
-version = "0.0.18"
+version = "0.0.19"
 description = "JAX-native port of POSEIDON's transmission-spectroscopy forward model."
 readme = "README.md"
 requires-python = ">=3.11"

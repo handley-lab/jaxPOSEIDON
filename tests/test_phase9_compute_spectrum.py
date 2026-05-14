@@ -153,12 +153,73 @@ def test_compute_spectrum_rejects_gpu_device():
         j_compute_spectrum(planet, star, model, atmosphere, opac, wl, device="gpu")
 
 
-def test_compute_spectrum_rejects_disable_continuum():
+def test_compute_spectrum_save_spectrum_matches_poseidon(tmp_path, monkeypatch):
+    """Phase 0.5.17a: save_spectrum=True writes the same file POSEIDON does."""
+    import os
+
+    from POSEIDON.core import compute_spectrum as p_compute_spectrum
     planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
-    with pytest.raises(NotImplementedError, match="disable_continuum"):
-        j_compute_spectrum(
-            planet, star, model, atmosphere, opac, wl, disable_continuum=True
-        )
+    model["model_name"] = "test_model"
+    monkeypatch.chdir(tmp_path)
+
+    # Both ports write to ./POSEIDON_output/<planet>/spectra/
+    os.makedirs(
+        f"POSEIDON_output/{planet['planet_name']}/spectra", exist_ok=True,
+    )
+    ours = j_compute_spectrum(
+        planet, star, model, atmosphere, opac, wl, save_spectrum=True,
+    )
+    ours_file = (
+        tmp_path / "POSEIDON_output" / planet["planet_name"] / "spectra"
+        / f"{planet['planet_name']}_test_model_spectrum.txt"
+    )
+    assert ours_file.is_file()
+
+    # POSEIDON shares the path. Rename our output and rerun POSEIDON.
+    ours_rows = np.loadtxt(ours_file)
+    ours_file.rename(ours_file.with_suffix(".jp.txt"))
+
+    theirs = p_compute_spectrum(
+        planet, star, model, atmosphere, opac, wl, save_spectrum=True,
+    )
+    np.testing.assert_array_equal(ours, theirs)
+
+    theirs_rows = np.loadtxt(ours_file)
+    np.testing.assert_array_equal(ours_rows, theirs_rows)
+
+
+def test_compute_spectrum_disable_continuum_matches_poseidon():
+    """Phase 0.5.17c: disable_continuum=True parity vs POSEIDON in opacity-sampling.
+
+    POSEIDON's opacity-sampling extinction silently ignores the
+    disable_continuum kwarg (only the LBL kernel honors it; see
+    POSEIDON absorption.py:1632 vs :1034); compute_spectrum therefore
+    returns the same spectrum whether disable_continuum is True or False
+    under opacity_sampling. Test asserts both behaviours.
+    """
+    from POSEIDON.core import compute_spectrum as p_compute_spectrum
+    planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
+    ours = j_compute_spectrum(
+        planet, star, model, atmosphere, opac, wl, disable_continuum=True,
+    )
+    theirs = p_compute_spectrum(
+        planet, star, model, atmosphere, opac, wl, disable_continuum=True,
+    )
+    np.testing.assert_array_equal(ours, theirs)
+
+
+def test_compute_spectrum_disable_continuum_is_inert_in_opacity_sampling():
+    """Matches POSEIDON: opacity-sampling extinction ignores disable_continuum,
+    so toggling the kwarg under opacity_sampling leaves the spectrum unchanged.
+    LBL mode honors disable_continuum (POSEIDON absorption.py:1632)."""
+    planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
+    s_on = j_compute_spectrum(
+        planet, star, model, atmosphere, opac, wl, disable_continuum=False,
+    )
+    s_off = j_compute_spectrum(
+        planet, star, model, atmosphere, opac, wl, disable_continuum=True,
+    )
+    np.testing.assert_array_equal(s_on, s_off)
 
 
 @pytest.mark.parametrize("cloud_model", ["Iceberg", "Mie", "eddysed"])
