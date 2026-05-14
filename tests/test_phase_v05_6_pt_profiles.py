@@ -71,13 +71,22 @@ def test_compute_T_Line_matches_poseidon(P, alpha, beta):
     )
 
 
-def test_compute_T_slope_matches_poseidon(P):
+@pytest.mark.parametrize("log_P_phot,log_P_arr", [
+    # Default knots: log_P_phot = 0.5 lies between knots 4 (0.0) and 5 (1.0).
+    (0.5, [-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0]),
+    # log_P_phot below first knot — exercises i_phot=0 branch in prior_index.
+    (-4.0, [-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0]),
+    # log_P_phot near upper edge — exercises i_phot=len-1 branch.
+    (2.5, [-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0]),
+    # log_P_phot mid-grid, non-default 5-knot array — different PT_state length.
+    (0.5, [-2.0, -1.0, 0.0, 1.0, 2.0]),
+])
+def test_compute_T_slope_matches_poseidon(P, log_P_phot, log_P_arr):
     from POSEIDON.atmosphere import compute_T_slope as p_slope
-    Delta_T_arr = np.array([100.0, 80.0, 60.0, 40.0, 30.0, 20.0, 10.0])
-    log_P_arr = [-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0]
+    Delta_T_arr = np.linspace(100.0, 10.0, len(log_P_arr))
     np.testing.assert_array_equal(
-        _atmosphere.compute_T_slope(P, 1200.0, Delta_T_arr, 0.5, log_P_arr),
-        p_slope(P, 1200.0, Delta_T_arr, 0.5, log_P_arr),
+        _atmosphere.compute_T_slope(P, 1200.0, Delta_T_arr, log_P_phot, log_P_arr),
+        p_slope(P, 1200.0, Delta_T_arr, log_P_phot, log_P_arr),
     )
 
 
@@ -179,13 +188,28 @@ def test_profiles_Line_matches_poseidon():
     _profiles_assert_match(cfg)
 
 
-@pytest.mark.parametrize("N_layers", [50, 100, 75])
-def test_profiles_slope_matches_poseidon(N_layers):
-    """Slope profile through the smoothing branch — sensitive to smooth_width."""
+@pytest.mark.parametrize("N_layers,log_P_phot,log_P_arr", [
+    (50, 0.5, (-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0)),
+    (75, 0.5, (-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0)),
+    (100, 0.5, (-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0)),
+    # Different log_P_phot positions (POSEIDON's pchip requires log_P_phot
+    # not coincide with a knot — strictly-increasing-x constraint).
+    (50, -1.5, (-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0)),
+    (50, 1.7, (-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0)),
+    # Non-default 5-knot array.
+    (50, 0.5, (-2.0, -1.0, 0.0, 1.0, 2.0)),
+])
+def test_profiles_slope_matches_poseidon(N_layers, log_P_phot, log_P_arr):
+    """Slope profile through the smoothing branch — covers smooth_width over
+    multiple N_layers and i_phot over multiple log_P_phot positions including
+    a non-default knot grid."""
     cfg = _common_atm_args(N_layers=N_layers)
+    Delta_T_arr = list(np.linspace(100.0, 10.0, len(log_P_arr)))
     cfg.update(
         PT_profile="slope", X_profile="isochem",
-        PT_state=np.array([1200.0, 100.0, 80.0, 60.0, 40.0, 30.0, 20.0, 10.0]),
+        PT_state=np.array([1200.0, *Delta_T_arr]),
+        log_P_slope_phot=log_P_phot,
+        log_P_slope_arr=log_P_arr,
     )
     _profiles_assert_match(cfg)
 
@@ -238,6 +262,10 @@ def _poseidon_assign(**overrides):
 
 @pytest.mark.parametrize("PT_profile,extra", [
     ("slope", {}),
+    # Non-default slope knot array changes both PT_param count and
+    # N_params_cumulative — exercises ordering parity.
+    ("slope", {"log_P_slope_arr": [-2.0, -1.0, 0.0, 1.0, 2.0]}),
+    ("Pelletier", {"number_P_knots": 3}),
     ("Pelletier", {"number_P_knots": 5}),
     ("Pelletier", {"number_P_knots": 7, "PT_penalty": True}),
     ("Guillot", {}),
