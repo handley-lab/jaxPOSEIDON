@@ -12,7 +12,8 @@ env:
 
 jobs:
   version-check:
-    if: "!startsWith(github.ref, 'refs/tags/')"
+    # Only enforce on PRs — pre-commit + branch protection handle main commits.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,9 +65,11 @@ jobs:
       - name: Install jaxposeidon + POSEIDON
         run: |
           pip install -e ".[dev]"
-          # POSEIDON itself + its runtime deps (pymultinest is library-gated; stub it).
-          pip install spectres mpi4py miepython pysynphot pymultinest
-          pip install git+https://github.com/MartianColonist/POSEIDON
+          # POSEIDON's own deps; install separately to keep numpy>=2 from
+          # jaxposeidon's pin. --no-deps on POSEIDON avoids it dragging
+          # numpy<2 back in.
+          pip install spectres mpi4py miepython pysynphot pymultinest h5py
+          pip install --no-deps git+https://github.com/MartianColonist/POSEIDON
           # Provide a stub for libmultinest.so so pymultinest imports succeed.
           mkdir -p $RUNNER_TEMP/poseidon_stubs/pymultinest
           cat > $RUNNER_TEMP/poseidon_stubs/pymultinest/__init__.py <<'EOF'
