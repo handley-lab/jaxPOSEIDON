@@ -37,7 +37,16 @@ This is scientific code, not a web service.
 - No module-level globals (other than POSEIDON-extracted constants in
   `_constants.py` and `_species_data.py`).
 - No mutable state.
-- No singletons / registries / dispatch tables.
+- No singletons / registries / mutable dispatch tables.
+- **Immutable POSEIDON-mirror dispatch tables ARE allowed in setup-only
+  modules** (`_loaddata.py`, `_instrument_setup.py`,
+  `_parameter_setup.py`, `_stellar_grid_loader.py`,
+  `_fastchem_grid_loader.py`, `_aerosol_db_loader.py`,
+  `_eddysed_input_loader.py`, `_lbl_table_loader.py`) where they
+  mirror POSEIDON's `reference_data/` dispatch. They must be plain
+  constants — frozen dicts/tuples — and must not be mutated at
+  runtime. The "no dispatch tables" rule continues to apply to JAX
+  hot-path modules.
 - Tests use `pytest` fixtures; data is passed in, not pulled from globals.
 
 ## 4. One concept per module
@@ -47,22 +56,43 @@ This is scientific code, not a web service.
 - `_opacities.py` — runtime extinction (nearest-index lookup,
   cloud/surface thresholds).
 - `_atmosphere.py` — T-P profiles, hydrostatic R(P), μ.
-- `_chemistry.py` — free chemistry (v0 stub; equilibrium chem deferred).
-- `_clouds.py` — MacMad17 deck/haze parameter unpacking.
-- `_instruments.py` — convolution, binning.
-- `_geometry.py` — angular grids, zone boundaries.
-- `_transmission.py` — TRIDENT chord RT.
-- `_parameters.py` — v0-branches of POSEIDON parameter/state layer.
+- `_chemistry.py` — free chemistry hot path; FastChem equilibrium-chemistry
+  interpolation runs here in v0.5 (loader stays in
+  `_fastchem_grid_loader.py`).
+- `_clouds.py` — MacMad17 (v0) + Mie / eddysed (v0.5) parameter unpacking.
+- `_instruments.py` — JAX-pure convolution / binning hot path
+  (setup-only `compute_instrument_indices` + photometric dispatch
+  table lives in `_instrument_setup.py`).
+- `_geometry.py` — angular grids, zone boundaries; 2D/3D in v0.5.
+- `_transmission.py` — TRIDENT chord RT (transmission only).
+- `_emission.py`, `_reflection.py` — Toon two-stream solvers (v0.5+).
+- `_surfaces.py` — surface parameter parsing + albedo interpolation
+  (v0.5+); spectral effect in `_compute_spectrum.py` emission flow.
+- `_stellar.py` — stellar contamination application (v0.5+;
+  pysynphot/PyMSG loaders in `_stellar_grid_loader.py`).
+- `_lbl.py` — line-by-line opacity mode (v0.5+; HDF5 loader in
+  `_lbl_table_loader.py`).
+- `_high_res.py` — high-resolution observable pipeline (v0.5+).
+- `_parameters.py` — hot-path split/unpack of already-constructed
+  parameter vectors (JAX-pure in v1). String-heavy
+  `assign_free_params`, kwarg dispatch, POSEIDON-mirror dispatch
+  tables live in `_parameter_setup.py`.
 - `_data.py` — offsets, error inflation, Gaussian likelihood.
-- `_priors.py` — unit-cube prior transform.
-- `_constants.py`, `_species_data.py` — build-time-extracted POSEIDON tables.
-- `core.py` — v0 public API re-exports (`compute_spectrum`,
-  `bin_spectrum_to_data`, `loglikelihood`, `prior_transform`,
-  `make_loglikelihood`, `load_data`, `init_instrument`, ...).
-  POSEIDON setup functions (`create_star`, `create_planet`,
-  `define_model`, `read_opacities`, `make_atmosphere`) are NOT
-  re-exported in v0 — callers use POSEIDON for setup and jaxposeidon
-  for the ported hot path.
+- `_priors.py` — unit-cube prior transform (uniform / Gaussian /
+  sine in v0; CLR + PT_penalty + 2D/3D Δ-mixing-ratio gating in v0.5).
+- `_constants.py`, `_species_data.py` — build-time-extracted POSEIDON
+  tables.
+- `core.py` — public API mirror. v0 re-exports the ported hot-path
+  surface; v0.5 adds POSEIDON setup API (`create_star`,
+  `create_planet`, `define_model`, `read_opacities`,
+  `make_atmosphere`, `wl_grid_constant_R`) so callers can run
+  end-to-end without `import POSEIDON` at runtime.
+- `_loaddata.py`, `_instrument_setup.py`, `_parameter_setup.py`,
+  `_stellar_grid_loader.py`, `_fastchem_grid_loader.py`,
+  `_aerosol_db_loader.py`, `_eddysed_input_loader.py`,
+  `_lbl_table_loader.py` — **setup-only modules**: numpy / scipy /
+  h5py / pysynphot / PyMSG / file I/O permitted; never called from
+  inside `jit`; allow-listed by the v1 source-grep gate.
 
 Do not cross these concerns. If you need cloud info in a transmission
 function, pass it in.

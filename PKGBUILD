@@ -1,6 +1,6 @@
 # Maintainer: Will Handley <wh260@cam.ac.uk>
 pkgname=python-jaxposeidon
-pkgver=0.0.3
+pkgver=0.0.4
 pkgrel=1
 pkgdesc="JAX-friendly port of POSEIDON's transmission-spectroscopy forward model"
 arch=('any')
