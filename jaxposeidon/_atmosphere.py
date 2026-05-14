@@ -33,15 +33,17 @@ from jaxposeidon._species_data import inactive_species as _INACTIVE_SPECIES_LOCA
 from jaxposeidon._species_data import masses as _masses
 
 _V0_PT_PROFILES = frozenset({"isotherm", "Madhu"})
-_V05_PT_PROFILES_1D = frozenset({
-    "isotherm",
-    "Madhu",
-    "slope",
-    "Pelletier",
-    "Guillot",
-    "Guillot_dayside",
-    "Line",
-})
+_V05_PT_PROFILES_1D = frozenset(
+    {
+        "isotherm",
+        "Madhu",
+        "slope",
+        "Pelletier",
+        "Guillot",
+        "Guillot_dayside",
+        "Line",
+    }
+)
 _V0_X_PROFILES = frozenset({"isochem"})
 
 
@@ -137,12 +139,12 @@ def compute_T_slope(
         if i == 0:
             T_points[i] = T_phot - np.sum(Delta_T_arr[i_phot::-1])
         else:
-            T_points[i] = T_phot - np.sum(Delta_T_arr[i_phot:i - 1:-1])
+            T_points[i] = T_phot - np.sum(Delta_T_arr[i_phot : i - 1 : -1])
 
     T_points[i_phot + 1] = T_phot
 
     for i in range(i_phot + 2, N_T_points):
-        T_points[i] = T_phot + np.sum(Delta_T_arr[i_phot + 1:i])
+        T_points[i] = T_phot + np.sum(Delta_T_arr[i_phot + 1 : i])
 
     T = np.zeros(shape=(N_layers, 1, 1))
     T[:, 0, 0] = pchip_interpolate(log_P_points, T_points, np.log10(P))
@@ -218,7 +220,9 @@ def compute_T_Guillot_dayside(P, g, log_kappa_IR, log_gamma, T_int, T_equ):
     return T
 
 
-def compute_T_Line(P, g, T_eq, log_kappa_IR, log_gamma, log_gamma_2, alpha, beta, T_int):
+def compute_T_Line(
+    P, g, T_eq, log_kappa_IR, log_gamma, log_gamma_2, alpha, beta, T_int
+):
     """1D Line (2013) double-channel P-T profile.
 
     Bit-equivalent port of POSEIDON `atmosphere.py:465-532` (PLATON

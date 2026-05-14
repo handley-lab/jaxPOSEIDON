@@ -23,15 +23,17 @@ import numpy as np
 # v0 configuration whitelist
 # ---------------------------------------------------------------------------
 V0_PT_PROFILES = frozenset({"isotherm", "Madhu"})
-V05_PT_PROFILES_1D = frozenset({
-    "isotherm",
-    "Madhu",
-    "slope",
-    "Pelletier",
-    "Guillot",
-    "Guillot_dayside",
-    "Line",
-})
+V05_PT_PROFILES_1D = frozenset(
+    {
+        "isotherm",
+        "Madhu",
+        "slope",
+        "Pelletier",
+        "Guillot",
+        "Guillot_dayside",
+        "Line",
+    }
+)
 V0_X_PROFILES = frozenset({"isochem"})
 V0_CLOUD_MODELS = frozenset({"cloud-free", "MacMad17"})
 V0_CLOUD_TYPES = frozenset({"deck", "haze", "deck_haze"})
@@ -182,9 +184,7 @@ def assert_v0_model_config(
     # Pelletier+penalty *prior* (spline smoothness penalty) is deferred to
     # Phase 0.5.10.
     if PT_penalty and PT_profile != "Pelletier":
-        raise NotImplementedError(
-            "PT_penalty only applies to PT_profile='Pelletier'."
-        )
+        raise NotImplementedError("PT_penalty only applies to PT_profile='Pelletier'.")
     if lognormal_logwidth_free:
         raise NotImplementedError(
             "lognormal_logwidth_free only applies to Mie aerosols, which "
