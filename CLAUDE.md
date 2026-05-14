@@ -40,13 +40,15 @@ This is scientific code, not a web service.
 - No singletons / registries / mutable dispatch tables.
 - **Immutable POSEIDON-mirror dispatch tables ARE allowed in setup-only
   modules** (`_loaddata.py`, `_instrument_setup.py`,
-  `_parameter_setup.py`, `_stellar_grid_loader.py`,
-  `_fastchem_grid_loader.py`, `_aerosol_db_loader.py`,
-  `_eddysed_input_loader.py`, `_lbl_table_loader.py`) where they
-  mirror POSEIDON's `reference_data/` dispatch. They must be plain
-  constants — frozen dicts/tuples — and must not be mutated at
-  runtime. The "no dispatch tables" rule continues to apply to JAX
-  hot-path modules.
+  `_parameter_setup.py`, `_surface_setup.py`,
+  `_stellar_grid_loader.py`, `_fastchem_grid_loader.py`,
+  `_aerosol_db_loader.py`, `_eddysed_input_loader.py`,
+  `_lbl_table_loader.py`) where they mirror POSEIDON's
+  `reference_data/` dispatch **or** POSEIDON's setup-time
+  model/parameter dispatch (e.g. `assign_free_params` parameter-name
+  lookups). They must be plain constants — frozen dicts/tuples — and
+  must not be mutated at runtime. The "no dispatch tables" rule
+  continues to apply to JAX hot-path modules.
 - Tests use `pytest` fixtures; data is passed in, not pulled from globals.
 
 ## 4. One concept per module
@@ -66,8 +68,10 @@ This is scientific code, not a web service.
 - `_geometry.py` — angular grids, zone boundaries; 2D/3D in v0.5.
 - `_transmission.py` — TRIDENT chord RT (transmission only).
 - `_emission.py`, `_reflection.py` — Toon two-stream solvers (v0.5+).
-- `_surfaces.py` — surface parameter parsing + albedo interpolation
-  (v0.5+); spectral effect in `_compute_spectrum.py` emission flow.
+- `_surfaces.py` — JAX-pure surface-albedo interpolation hot path
+  (v0.5+). File I/O + lab-data dispatch live in
+  `_surface_setup.py`. Spectral effect applied in
+  `_compute_spectrum.py` emission flow.
 - `_stellar.py` — stellar contamination application (v0.5+;
   pysynphot/PyMSG loaders in `_stellar_grid_loader.py`).
 - `_lbl.py` — line-by-line opacity mode (v0.5+; HDF5 loader in
@@ -88,11 +92,12 @@ This is scientific code, not a web service.
   `make_atmosphere`, `wl_grid_constant_R`) so callers can run
   end-to-end without `import POSEIDON` at runtime.
 - `_loaddata.py`, `_instrument_setup.py`, `_parameter_setup.py`,
-  `_stellar_grid_loader.py`, `_fastchem_grid_loader.py`,
-  `_aerosol_db_loader.py`, `_eddysed_input_loader.py`,
-  `_lbl_table_loader.py` — **setup-only modules**: numpy / scipy /
-  h5py / pysynphot / PyMSG / file I/O permitted; never called from
-  inside `jit`; allow-listed by the v1 source-grep gate.
+  `_surface_setup.py`, `_stellar_grid_loader.py`,
+  `_fastchem_grid_loader.py`, `_aerosol_db_loader.py`,
+  `_eddysed_input_loader.py`, `_lbl_table_loader.py` —
+  **setup-only modules**: numpy / scipy / h5py / pysynphot / PyMSG /
+  file I/O permitted; never called from inside `jit`; allow-listed by
+  the v1 source-grep gate.
 
 Do not cross these concerns. If you need cloud info in a transmission
 function, pass it in.
