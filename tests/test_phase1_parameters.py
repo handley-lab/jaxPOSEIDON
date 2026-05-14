@@ -149,9 +149,9 @@ def test_v0_config_accepts_k2_18b_one_offset():
                 X_profile="isochem",
                 cloud_model="MacMad17",
                 cloud_dim=2,
-                stellar_contam="one_spot",
+                stellar_contam="bogus_spot",
             ),
-            "Stellar",
+            "stellar_contam",
         ),
         # Phase 0.5.3: surface=True is now supported (parameter parsing only;
         # spectrum effect lands in Phase 0.5.13d).

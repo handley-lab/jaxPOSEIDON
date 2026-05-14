@@ -154,8 +154,15 @@ def assert_v0_model_config(
         raise NotImplementedError(
             f"Atmosphere_dimension={Atmosphere_dimension} not in {{1, 2, 3}}"
         )
-    if stellar_contam is not None:
-        raise NotImplementedError("Stellar contamination is deferred to v1")
+    if stellar_contam is not None and stellar_contam not in (
+        "one_spot",
+        "one_spot_free_log_g",
+        "two_spots",
+        "two_spots_free_log_g",
+    ):
+        raise NotImplementedError(
+            f"stellar_contam={stellar_contam!r} not a known POSEIDON option"
+        )
     if offsets_applied not in V0_OFFSETS:
         raise NotImplementedError(
             f"offsets_applied={offsets_applied!r} not in v0 "
@@ -428,8 +435,26 @@ def assign_free_params(
     N_geometry_params = len(geometry_params)
     params += geometry_params
 
-    # Stellar parameters (parameters.py:1016-1031): always empty in v0
-    N_stellar_params = 0
+    # Stellar parameters (parameters.py:1016-1031)
+    if stellar_contam == "one_spot":
+        stellar_params += ["f_het", "T_het", "T_phot"]
+    elif stellar_contam == "one_spot_free_log_g":
+        stellar_params += ["f_het", "T_het", "T_phot", "log_g_het", "log_g_phot"]
+    elif stellar_contam == "two_spots":
+        stellar_params += ["f_spot", "f_fac", "T_spot", "T_fac", "T_phot"]
+    elif stellar_contam == "two_spots_free_log_g":
+        stellar_params += [
+            "f_spot",
+            "f_fac",
+            "T_spot",
+            "T_fac",
+            "T_phot",
+            "log_g_spot",
+            "log_g_fac",
+            "log_g_phot",
+        ]
+    N_stellar_params = len(stellar_params)
+    params += stellar_params
 
     # Offsets (parameters.py:1035-1047)
     if offsets_applied is None:
