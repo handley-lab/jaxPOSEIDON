@@ -186,6 +186,7 @@ def test_assign_free_params_stellar_block_matches_poseidon(stellar_contam, expec
 def test_load_stellar_pysynphot_matches_poseidon():
     from jaxposeidon._stellar_grid_loader import load_stellar_pysynphot
     from POSEIDON.stellar import load_stellar_pysynphot as p_load
+
     wl = np.linspace(0.5, 5.0, 200)
     np.testing.assert_allclose(
         load_stellar_pysynphot(wl, 5800.0, 0.0, 4.4),
@@ -208,6 +209,7 @@ def test_load_stellar_pymsg_matches_poseidon():
         load_stellar_pymsg as p_load,
         open_pymsg_grid as p_open,
     )
+
     wl = np.linspace(0.5, 5.0, 200)
     grid_name = "Goettingen-HiRes"
     sg_ours = open_pymsg_grid(grid_name)
