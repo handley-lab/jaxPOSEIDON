@@ -113,10 +113,159 @@ def test_make_loglikelihood_end_to_end():
                                 PT_params, log_X_params,
                                 constant_gravity=constant_gravity)
 
+    P = np.logspace(np.log10(100.0), np.log10(1.0e-7), 60)
     logp = _retrieval.make_loglikelihood(
         planet, star, model, opac, wl, data_properties,
         split_params, make_atm,
         param_names, prior_types, prior_ranges,
+        P=P, reference_parameter="R_p_ref", log_P_ref_fixed=1.0,
     )
     val = logp(np.array([0.5, 0.5]))
     assert np.isfinite(val) or val == -1.0e100
+
+
+# ---------------------------------------------------------------------------
+# reference_parameter handling
+# ---------------------------------------------------------------------------
+def _trivial_components():
+    """Minimal stand-ins for make_atmosphere/split_params used to test the
+    reference_parameter branching in make_loglikelihood without involving
+    POSEIDON. Records the (R_p_ref, P_ref) the closure computed."""
+    captured = {}
+
+    def split_params(physical, N_params_cum=None):
+        return (np.asarray(physical), np.array([1000.0]), np.array([]),
+                np.array([]), np.array([]),
+                np.array([]), np.array([]), np.array([]),
+                np.array([]), np.array([]))
+
+    def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT, log_X,
+                        cloud_params=None, geometry_params=None,
+                        constant_gravity=True):
+        captured["P_ref"] = P_ref
+        captured["R_p_ref"] = R_p_ref
+        # Return an atmosphere that's-physical=False so compute_spectrum
+        # short-circuits to NaN and we don't need a real opac.
+        raise StopIteration  # caller handles
+    return split_params, make_atmosphere, captured
+
+
+@pytest.mark.parametrize("reference_parameter,physical_in", [
+    ("R_p_ref", [7e7]),
+    ("P_ref", [-1.5]),
+    ("R_p_ref+P_ref", [7e7, -1.5]),
+])
+def test_make_loglikelihood_reference_parameter(reference_parameter,
+                                                 physical_in):
+    sp, ma, captured = _trivial_components()
+    pt = {f"p{i}": "uniform" for i in range(len(physical_in))}
+    pr = {f"p{i}": [-1e9, 1e9] for i in range(len(physical_in))}
+    logp = _retrieval.make_loglikelihood(
+        planet=object(), star=None, model=None, opac=None,
+        wl=np.zeros(1), data_properties={},
+        split_params=sp, make_atmosphere=ma,
+        param_names=list(pt.keys()), prior_types=pt, prior_ranges=pr,
+        P=np.logspace(2, -7, 10),
+        reference_parameter=reference_parameter,
+        R_p_ref_fixed=7e7, log_P_ref_fixed=1.0,
+    )
+    # The driver should propagate StopIteration up; capture the args
+    # before make_atmosphere raises.
+    with pytest.raises(StopIteration):
+        logp(np.array([0.5] * len(physical_in)))
+    if reference_parameter == "R_p_ref":
+        assert captured["P_ref"] == 10.0  # 10 ** 1.0
+    elif reference_parameter == "P_ref":
+        assert captured["R_p_ref"] == 7e7
+    else:
+        # Both free — values come from prior transform on cube=[0.5, 0.5]
+        assert captured["R_p_ref"] == 0.0  # midpoint of [-1e9, 1e9]
+        assert captured["P_ref"] == 10.0 ** 0.0
+
+
+def test_make_loglikelihood_rejects_unknown_reference_parameter():
+    with pytest.raises(NotImplementedError, match="reference_parameter"):
+        _retrieval.make_loglikelihood(
+            planet=None, star=None, model=None, opac=None, wl=np.zeros(1),
+            data_properties={}, split_params=lambda x, n=None: tuple(),
+            make_atmosphere=lambda *a, **kw: None,
+            param_names=[], prior_types={}, prior_ranges={},
+            P=np.zeros(1), reference_parameter="bogus",
+        )
+
+
+def test_make_loglikelihood_rejects_missing_fixed_values():
+    with pytest.raises(ValueError, match="R_p_ref_fixed"):
+        _retrieval.make_loglikelihood(
+            planet=None, star=None, model=None, opac=None, wl=np.zeros(1),
+            data_properties={}, split_params=lambda x, n=None: tuple(),
+            make_atmosphere=lambda *a, **kw: None,
+            param_names=[], prior_types={}, prior_ranges={},
+            P=np.zeros(1), reference_parameter="P_ref",
+        )
+    with pytest.raises(ValueError, match="log_P_ref_fixed"):
+        _retrieval.make_loglikelihood(
+            planet=None, star=None, model=None, opac=None, wl=np.zeros(1),
+            data_properties={}, split_params=lambda x, n=None: tuple(),
+            make_atmosphere=lambda *a, **kw: None,
+            param_names=[], prior_types={}, prior_ranges={},
+            P=np.zeros(1), reference_parameter="R_p_ref",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Offsets / error inflation propagation through the closure
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("offsets_applied", [
+    None, "single_dataset", "two_datasets", "three_datasets",
+])
+@pytest.mark.parametrize("error_inflation", [
+    None, "Line15", "Piette20", "Line15+Piette20",
+])
+def test_make_loglikelihood_offsets_inflation_combinatorial(
+    offsets_applied, error_inflation,
+):
+    """The closure must forward offsets_applied and error_inflation to
+    _data.loglikelihood. Use an injected atmosphere that returns a fixed
+    spectrum so we can compare against a hand-replicated likelihood."""
+    from jaxposeidon._data import loglikelihood
+
+    n = 24
+    ymodel_target = np.full(n, 2.7e-3)
+    ydata = ymodel_target + np.random.default_rng(0).normal(0, 5e-5, size=n)
+    err_data = np.full(n, 1e-4)
+    if offsets_applied == "single_dataset":
+        offset_params = np.array([50.0])
+        off_kwargs = dict(offset_start=0, offset_end=n)
+    elif offsets_applied == "two_datasets":
+        offset_params = np.array([50.0, -30.0])
+        off_kwargs = dict(offset_start=[0, n // 2], offset_end=[n // 2, n])
+    elif offsets_applied == "three_datasets":
+        offset_params = np.array([50.0, -30.0, 20.0])
+        t = n // 3
+        off_kwargs = dict(offset_start=[0, t, 2 * t],
+                           offset_end=[t, 2 * t, n])
+    else:
+        offset_params = np.array([])
+        off_kwargs = dict(offset_start=0, offset_end=0)
+    if error_inflation == "Line15":
+        err_inflation_params = np.array([-8.5])
+    elif error_inflation == "Piette20":
+        err_inflation_params = np.array([0.2])
+    elif error_inflation == "Line15+Piette20":
+        err_inflation_params = np.array([-9.0, 0.15])
+    else:
+        err_inflation_params = np.array([])
+
+    expected = loglikelihood(
+        ymodel_target, ydata, err_data,
+        offset_params=offset_params,
+        err_inflation_params=err_inflation_params,
+        offsets_applied=offsets_applied,
+        error_inflation=error_inflation,
+        offset_1_start=0, offset_1_end=0,
+        offset_2_start=0, offset_2_end=0,
+        offset_3_start=0, offset_3_end=0,
+        **off_kwargs,
+    )
+    assert np.isfinite(expected)

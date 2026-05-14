@@ -1,4 +1,11 @@
-"""Phase 10a: unit-cube prior transform parity with POSEIDON.
+"""Phase 10a: unit-cube prior transform — replicates POSEIDON formula.
+
+These tests compare against a line-for-line replication of
+`POSEIDON/retrieval.py:649-708` (uniform/Gaussian/sine for v0,
+Atmosphere_dimension=1, non-CLR). POSEIDON's `Prior(...)` is a closure
+inside `run_retrieval` that mutates a MultiNest-provided buffer
+in place, so direct POSEIDON invocation in isolation is not feasible —
+this test mirrors the arithmetic.
 
 v0 prior types: uniform, gaussian, sine (for alpha/beta/theta_0).
 CLR is v1 (and raises NotImplementedError).
@@ -36,7 +43,7 @@ def _poseidon_prior_inplace(cube, param_names, prior_types, prior_ranges):
     return cube
 
 
-def test_prior_transform_uniform():
+def test_prior_transform_uniform_replicates_poseidon_formula():
     param_names = ["T", "R_p", "log_X_H2O"]
     pt = {p: "uniform" for p in param_names}
     pr = {"T": [400.0, 2500.0], "R_p": [0.8, 1.2],
@@ -48,7 +55,7 @@ def test_prior_transform_uniform():
     )
 
 
-def test_prior_transform_gaussian():
+def test_prior_transform_gaussian_replicates_poseidon_formula():
     param_names = ["log_g"]
     pt = {"log_g": "gaussian"}
     pr = {"log_g": [3.5, 0.2]}  # mean=3.5, std=0.2
@@ -61,7 +68,7 @@ def test_prior_transform_gaussian():
         )
 
 
-def test_prior_transform_sine_alpha_beta_theta0():
+def test_prior_transform_sine_replicates_poseidon_formula():
     param_names = ["alpha", "beta", "theta_0"]
     pt = {p: "sine" for p in param_names}
     pr = {"alpha": [0.0, 60.0], "beta": [0.0, 30.0],
