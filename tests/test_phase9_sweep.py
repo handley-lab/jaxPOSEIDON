@@ -155,7 +155,7 @@ def _build_cloud_atm_and_opac(cloud_type, cloud_dim, f_cloud,
 def test_compute_spectrum_cloud_sweep_matches_poseidon(
     cloud_type, cloud_dim, f_cloud, log_a_haze, gamma_haze, log_P_cloud,
 ):
-    """MacMad17 cloud/haze sweep — bit-exact POSEIDON parity."""
+    """MacMad17 cloud/haze sweep — FP-precision POSEIDON parity (atol=1e-15, rtol=1e-13)."""
     from POSEIDON.core import compute_spectrum as p_compute_spectrum
     planet, star, model, atmosphere, opac, wl = _build_cloud_atm_and_opac(
         cloud_type, cloud_dim, f_cloud, log_a_haze, gamma_haze, log_P_cloud,

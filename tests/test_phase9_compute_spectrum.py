@@ -3,7 +3,12 @@
 Uses POSEIDON's own canonical Rayleigh oracle setup
 (`POSEIDON/tests/test_TRIDENT.py`) to construct planet/star/model/
 atmosphere/opac/wl, then runs both POSEIDON's `compute_spectrum` and
-jaxposeidon's port — assert bit-exact equality.
+jaxposeidon's port.
+
+The canonical Rayleigh case asserts bit-exact (`assert_array_equal`)
+equality; the broader end-to-end cases (Madhu/MS09 P-T, real molecular
+opacity, active species + CIA) assert FP-precision parity
+(`atol=1e-15, rtol=1e-13`), comfortably inside the ≤1 ppm plan target.
 """
 
 import os
