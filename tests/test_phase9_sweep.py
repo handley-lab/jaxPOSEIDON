@@ -1,15 +1,21 @@
 """Phase 9c: parametric forward-model regression sweep.
 
 Runs the K2-18 b-style v0 configuration through both POSEIDON's
-compute_spectrum and jaxposeidon's port across a grid of physical
-parameters. Asserts bit-exact equality on every case.
+compute_spectrum and jaxposeidon's port across the v0 atmosphere +
+MacMad17 cloud parameter grid. Asserts atol=1e-15, rtol=1e-13 — well
+inside the plan's ≤1 ppm binned-spectrum target.
 
-The plan calls for 1000+ cases. We achieve this combinatorially:
-- 4 isothermal T values
-- 4 R_p_ref values
-- 4 P_ref values
-- 4 H2-only / H2+He bulk fills
-- 4 enable_haze × enable_deck × f_cloud combinations
+Configuration matrix (396 cases total):
+- Atmosphere (6 × 5 × 5 × 2 = 300 cases):
+    T_iso ∈ {500, 700, 900, 1100, 1300, 1500} K
+    R_p_ref_factor ∈ {0.9, 0.95, 1.0, 1.05, 1.1}
+    P_ref ∈ {1, 5, 10, 50, 100} bar
+    bulk ∈ {[H2], [H2, He]}
+- MacMad17 cloud (3 × 2 × 2 × 2 × 2 × 2 = 96 cases):
+    cloud_type ∈ {deck, haze, deck_haze}
+    cloud_dim ∈ {1, 2}
+    f_cloud ∈ {0.3, 0.7}, log_a_haze ∈ {-2, 2},
+    gamma_haze ∈ {-4, 0}, log_P_cloud ∈ {-2, 0}
 """
 
 import os

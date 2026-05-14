@@ -42,6 +42,7 @@ def test_init_instrument_matches_poseidon_NIRSpec_PRISM():
     {"offset_datasets": ["dsA.dat"]},
     {"offset_datasets": ["dsA.dat", "dsB.dat"]},
     {"offset_datasets": ["dsA.dat", "dsB.dat", "dsC.dat"]},
+    {"offset_1_datasets": ["dsA.dat"]},
     {"offset_1_datasets": ["dsA.dat", "dsB.dat"]},
     {"offset_1_datasets": ["dsA.dat"], "offset_2_datasets": ["dsB.dat"]},
     {"offset_1_datasets": ["dsA.dat"], "offset_2_datasets": ["dsB.dat"],

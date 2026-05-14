@@ -28,7 +28,7 @@ from jaxposeidon._transmission import TRIDENT
 
 def check_atmosphere_physical(atmosphere, opac):
     """Port of POSEIDON `core.py:1255-1300`."""
-    if atmosphere["is_physical"] is False:
+    if not bool(atmosphere["is_physical"]):
         return False
     if opac["opacity_treatment"] == "opacity_sampling":
         T = atmosphere["T"]
@@ -36,6 +36,11 @@ def check_atmosphere_physical(atmosphere, opac):
         if (np.max(T) > np.max(T_fine)) or (np.min(T) < np.min(T_fine)):
             return False
     return True
+
+
+_V0_CLOUD_MODELS = {"cloud-free", "MacMad17"}
+_V0_CLOUD_TYPES = {"deck", "haze", "deck_haze"}
+_V0_CLOUD_DIMS = {1, 2}
 
 
 def compute_spectrum(planet, star, model, atmosphere, opac, wl,
@@ -50,10 +55,15 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
     Mirrors POSEIDON `core.py:1303-2132` filtered to the transmission /
     opacity-sampling / cpu / MacMad17 path.
     """
+    # --- v0-envelope guards BEFORE any atmosphere-dependent computation ---
     if device != "cpu":
         raise NotImplementedError(f"device={device!r} (only cpu in v0)")
     if save_spectrum:
         raise NotImplementedError("save_spectrum=True (file I/O) is v1")
+    if disable_continuum:
+        raise NotImplementedError(
+            "disable_continuum=True is v1 (CIA/Rayleigh always on in v0)"
+        )
     if return_albedo:
         raise NotImplementedError("return_albedo=True is for emission (v1)")
     if len(kappa_contributions) or len(cloud_properties_contributions):
@@ -62,11 +72,6 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
     disable_atmosphere = model["disable_atmosphere"]
     if disable_atmosphere:
         raise NotImplementedError("disable_atmosphere=True (bare-rock) is v1")
-
-    if not check_atmosphere_physical(atmosphere, opac):
-        out = np.empty(len(wl))
-        out[:] = np.nan
-        return out
 
     if spectrum_type != "transmission":
         raise NotImplementedError(
@@ -80,9 +85,32 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
         raise NotImplementedError("thermal_scattering / reflection are v1")
     if model.get("surface"):
         raise NotImplementedError("surface models are v1")
-    if "Mie" in model.get("cloud_model", "") or "eddysed" in model.get(
-            "cloud_model", ""):
-        raise NotImplementedError("Mie / eddysed clouds are v1")
+
+    cloud_model = model.get("cloud_model", "cloud-free")
+    if cloud_model not in _V0_CLOUD_MODELS:
+        raise NotImplementedError(
+            f"cloud_model={cloud_model!r} is v1 (v0 supports "
+            f"{sorted(_V0_CLOUD_MODELS)})"
+        )
+    if cloud_model == "MacMad17":
+        cloud_type = model.get("cloud_type", "")
+        if cloud_type not in _V0_CLOUD_TYPES:
+            raise NotImplementedError(
+                f"cloud_type={cloud_type!r} is v1 (v0 supports "
+                f"{sorted(_V0_CLOUD_TYPES)})"
+            )
+        cloud_dim = model.get("cloud_dim", 1)
+        if cloud_dim not in _V0_CLOUD_DIMS:
+            raise NotImplementedError(
+                f"cloud_dim={cloud_dim!r} is v1 (v0 supports "
+                f"{sorted(_V0_CLOUD_DIMS)})"
+            )
+
+    # --- physical-atmosphere check is the LAST guard before computation ---
+    if not check_atmosphere_physical(atmosphere, opac):
+        out = np.empty(len(wl))
+        out[:] = np.nan
+        return out
 
     # ----- unpack planet / atmosphere / model (POSEIDON core.py:1404-1466) ---
     b_p = planet["planet_impact_parameter"]
