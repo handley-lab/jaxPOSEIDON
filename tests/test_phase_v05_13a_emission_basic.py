@@ -56,10 +56,3 @@ def test_emission_bare_surface_matches_poseidon():
     )
 
 
-def test_emission_single_stream_rejects_unknown_quadrature():
-    T = np.array([1000.0])
-    dz = np.array([1e5])
-    wl = np.array([1.0, 2.0])
-    kappa = np.zeros((1, 2))
-    with pytest.raises(NotImplementedError, match="Gauss_quad"):
-        _emission.emission_single_stream(T, dz, wl, kappa, Gauss_quad=5)

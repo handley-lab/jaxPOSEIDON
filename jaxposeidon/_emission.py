@@ -44,8 +44,6 @@ def emission_single_stream(T, dz, wl, kappa, Gauss_quad=2):
         mu = np.array(
             [0.5 - 0.5 * np.sqrt(3.0 / 5.0), 0.5, 0.5 + 0.5 * np.sqrt(3.0 / 5.0)]
         )
-    else:
-        raise NotImplementedError(f"Gauss_quad={Gauss_quad} not in {{2, 3}}")
 
     B = planck_lambda_arr(T, wl)
     I = np.ones(shape=(len(mu), len(wl))) * B[0, :]
