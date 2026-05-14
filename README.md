@@ -100,6 +100,28 @@ single H2O group.
   jaxposeidon API surface and surface as `NotImplementedError` rather
   than `TypeError` (per the plan's “Review discipline”).
 
+### Visual parity
+
+Six representative v0 configurations — transmission spectra overlaid
+(POSEIDON dashed, jaxPOSEIDON solid) with per-wavelength residual in
+ppm. Five are bit-exact; the deck+haze config has a residual of
+≈10⁻¹² ppm:
+
+![spectra parity](figures/parity_spectra.png)
+
+End-to-end through the instrument model on a JWST NIRSpec PRISM-style
+40-bin layout (max binned residual = 0 ppm):
+
+![binned parity](figures/parity_binned.png)
+
+Distribution of max-per-case |Δ(transit depth)| across the 396-case
+Phase 9 sweep — 395/396 bit-exact, one case at 1.7×10⁻¹² ppm, 12
+orders of magnitude inside the plan's 1 ppm target:
+
+![sweep histogram](figures/sweep_histogram.png)
+
+Reproduce with `python scripts/generate_{parity_figures,binning_figure,sweep_histogram}.py`.
+
 ## Attribution
 
 POSEIDON: Ryan J. MacDonald (2022, BSD-3).
