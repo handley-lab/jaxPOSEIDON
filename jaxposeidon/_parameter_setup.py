@@ -32,9 +32,23 @@ V05_PT_PROFILES_1D = frozenset(
         "Guillot",
         "Guillot_dayside",
         "Line",
+        "gradient",
+        "two-gradients",
+        "file_read",
     }
 )
 V0_X_PROFILES = frozenset({"isochem"})
+V05_X_PROFILES = frozenset(
+    {
+        "isochem",
+        "gradient",
+        "two-gradients",
+        "dissociation",
+        "lever",
+        "file_read",
+        "chem_eq",
+    }
+)
 V0_CLOUD_MODELS = frozenset({"cloud-free", "MacMad17"})
 V0_CLOUD_TYPES = frozenset({"deck", "haze", "deck_haze"})
 V0_CLOUD_DIMS = frozenset({1, 2})
@@ -106,16 +120,14 @@ def assert_v0_model_config(
         )
     if gravity_setting == "free" and mass_setting == "free":
         raise Exception("Error: only one of mass or gravity can be a free parameter.")
-    if "ghost" in bulk_species:
-        raise NotImplementedError("v0 does not support 'ghost' bulk species")
     if PT_profile not in V05_PT_PROFILES_1D:
         raise NotImplementedError(
-            f"PT_profile={PT_profile!r} not in v0.5 1D set "
+            f"PT_profile={PT_profile!r} not in v0.5 set "
             f"({sorted(V05_PT_PROFILES_1D)})"
         )
-    if X_profile not in V0_X_PROFILES:
+    if X_profile not in V05_X_PROFILES:
         raise NotImplementedError(
-            f"X_profile={X_profile!r} not in v0 ({sorted(V0_X_PROFILES)})"
+            f"X_profile={X_profile!r} not in v0.5 set ({sorted(V05_X_PROFILES)})"
         )
     if cloud_model not in V0_CLOUD_MODELS:
         raise NotImplementedError(
@@ -162,12 +174,11 @@ def assert_v0_model_config(
         raise NotImplementedError("High-resolution mode is deferred to v1")
     if opaque_Iceberg or list(aerosol_species):
         raise NotImplementedError("Iceberg/Mie aerosols are deferred to v1")
-    if (
-        list(species_EM_gradient)
-        or list(species_DN_gradient)
-        or list(species_vert_gradient)
-    ):
-        raise NotImplementedError("v0 forbids per-species chemistry gradients")
+    if list(species_EM_gradient) or list(species_DN_gradient):
+        raise NotImplementedError(
+            "species_EM_gradient / species_DN_gradient require 2D/3D "
+            "atmosphere — deferred to Phase 0.5.9"
+        )
     if TwoD_type is not None:
         raise NotImplementedError("v0 forbids TwoD_type")
     # Atmosphere_dimension=1 ⇒ POSEIDON does not insert geometry params
@@ -330,6 +341,12 @@ def assign_free_params(
     # PT parameters (parameters.py:322-349, 1D only)
     if PT_profile == "isotherm":
         PT_params += ["T"]
+    elif PT_profile == "gradient":
+        PT_params += ["T_high", "T_deep"]
+    elif PT_profile == "two-gradients":
+        PT_params += ["T_high", "T_mid", "log_P_mid", "T_deep"]
+    elif PT_profile == "file_read":
+        pass  # No free PT parameters — profile loaded from file
     elif PT_profile == "Madhu":
         PT_params += ["a1", "a2", "log_P1", "log_P2", "log_P3", "T_ref"]
     elif PT_profile == "slope":
@@ -360,9 +377,34 @@ def assign_free_params(
     N_PT_params = len(PT_params)
     params += PT_params
 
-    # X parameters (parameters.py:436-454, 1D isochem only)
-    for species in param_species:
-        X_params += ["log_" + species]
+    # X parameters (parameters.py:434-454, 1D)
+    if X_profile == "chem_eq":
+        X_params += ["C_to_O", "log_Met"]
+    elif X_profile != "file_read":
+        for species in param_species:
+            has_profile = species in species_vert_gradient
+            if has_profile and X_profile == "gradient":
+                X_params += [f"log_{species}_high", f"log_{species}_deep"]
+            elif has_profile and X_profile == "two-gradients":
+                X_params += [
+                    f"log_{species}_high",
+                    f"log_{species}_mid",
+                    f"log_P_{species}_mid",
+                    f"log_{species}_deep",
+                ]
+            elif has_profile and X_profile == "lever":
+                X_params += [
+                    f"log_{species}_iso",
+                    f"log_P_{species}",
+                    f"Upsilon_{species}",
+                ]
+            elif has_profile and X_profile == "dissociation":
+                if species in ("H2O", "TiO", "VO", "H-", "Na", "K"):
+                    X_params += [f"log_{species}_deep"]
+                else:
+                    X_params += [f"log_{species}"]
+            else:
+                X_params += [f"log_{species}"]
     N_species_params = len(X_params)
     params += X_params
 

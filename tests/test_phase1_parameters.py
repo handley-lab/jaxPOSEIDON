@@ -91,9 +91,9 @@ def test_v0_config_accepts_k2_18b_one_offset():
 
 
 @pytest.mark.parametrize("kwargs,err_substring", [
-    (dict(PT_profile="file_read", X_profile="isochem",
+    (dict(PT_profile="bogus", X_profile="isochem",
           cloud_model="cloud-free", cloud_dim=1), "PT_profile"),
-    (dict(PT_profile="Madhu", X_profile="gradient",
+    (dict(PT_profile="Madhu", X_profile="bogus",
           cloud_model="cloud-free", cloud_dim=1), "X_profile"),
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="Iceberg", cloud_dim=1), "cloud_model"),
@@ -112,11 +112,8 @@ def test_v0_config_accepts_k2_18b_one_offset():
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           aerosol_species=("ZnS",)), "Iceberg/Mie"),
-    # Phase 0.5.2b: gravity_setting='free' / mass_setting='free' are
-    # now supported and no longer raise NotImplementedError.
-    (dict(PT_profile="Madhu", X_profile="isochem",
-          cloud_model="MacMad17", cloud_dim=2,
-          species_vert_gradient=("H2O",)), "gradients"),
+    # Phase 0.5.2b: gravity_setting/mass_setting='free' now supported.
+    # Phase 0.5.7: species_vert_gradient + ghost bulk now supported.
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           object_type="directly_imaged"), "transiting"),
@@ -126,9 +123,6 @@ def test_v0_config_accepts_k2_18b_one_offset():
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           reference_parameter="invalid"), "reference_parameter"),
-    (dict(PT_profile="Madhu", X_profile="isochem",
-          cloud_model="MacMad17", cloud_dim=2,
-          bulk_species=("ghost",)), "ghost"),
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           X_dim=2), "PT_dim=1, X_dim=1"),

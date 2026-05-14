@@ -158,14 +158,21 @@ def test_add_bulk_component_H_He():
     np.testing.assert_array_equal(X_ours, X_theirs)
 
 
-def test_add_bulk_component_H2_H_He_rejected():
-    """H2+H+He dissociation bulk is v0-deferred (raises NotImplementedError)."""
+def test_add_bulk_component_H2_H_He_matches_poseidon():
+    """H2+H+He dissociation bulk parity (Parmentier+18 H2 dissociation).
+
+    Bit-equivalent in pure numpy; POSEIDON's numba-jitted Parmentier path may
+    reorder one ULP, so this uses rtol=1e-13.
+    """
+    from POSEIDON.atmosphere import add_bulk_component as p_bulk
     P = np.logspace(np.log10(100.0), np.log10(1.0e-7), 20)
-    T = 300.0 * np.ones((20, 1, 1))
+    T = 2500.0 * np.ones((20, 1, 1))
     X_param = 0.001 * np.ones((1, 20, 1, 1))
-    with pytest.raises(NotImplementedError, match="dissociation"):
-        _atmosphere.add_bulk_component(P, T, X_param, 4, 1, 1,
-                                        ["H2", "H", "He"], 0.17)
+    np.testing.assert_allclose(
+        _atmosphere.add_bulk_component(P, T, X_param, 4, 1, 1, ["H2", "H", "He"], 0.17),
+        p_bulk(P, T, X_param, 4, 1, 1, ["H2", "H", "He"], 0.17),
+        atol=0, rtol=1e-13,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -421,15 +428,9 @@ def test_profiles_madhu_rejects_invalid_pressure_ordering():
 
 
 @pytest.mark.parametrize("kwargs,err_substring", [
-    (dict(PT_profile="gradient"), "PT_profile"),
-    (dict(PT_profile="file_read"), "PT_profile"),
-    (dict(X_profile="gradient"), "X_profile"),
-    (dict(X_profile="chem_eq"), "X_profile"),
+    (dict(PT_profile="bogus"), "PT_profile"),
+    (dict(X_profile="bogus"), "X_profile"),
     (dict(disable_atmosphere=True), "disable_atmosphere"),
-    (dict(N_sectors=2), "N_sectors=N_zones=1"),
-    (dict(species_vert_gradient=np.array(["H2O"])), "vertical gradient"),
-    (dict(Na_K_fixed_ratio=True), "Na_K_fixed_ratio"),
-    (dict(mu_back=2.3), "ghost-bulk"),
 ])
 def test_profiles_rejects_non_v0(kwargs, err_substring):
     cfg = _common_atm_args()
@@ -488,43 +489,23 @@ def test_profiles_single_species_bulk():
     _profiles_assert_match(cfg)
 
 
-def test_profiles_rejects_T_input():
-    """profiles() with T_input != None must raise NotImplementedError."""
+def test_profiles_chem_eq_without_grid_raises():
+    """X_profile='chem_eq' with no chemistry_grid must raise (matches POSEIDON)."""
     cfg = _common_atm_args()
     cfg.update(
-        PT_profile="isotherm", X_profile="isochem",
+        PT_profile="isotherm", X_profile="chem_eq",
         PT_state=np.array([1000.0]),
-        log_X_state=np.zeros((0, 4)),
-        included_species=np.array(["H2"]),
-        bulk_species=np.array(["H2"]),
-        param_species=np.array([], dtype=str),
-        active_species=np.array([], dtype=str),
+        log_X_state=np.array([0.5, 0.0]),  # C/O, [Met]
+        included_species=np.array(["H2", "He", "H2O"]),
+        bulk_species=np.array(["H2", "He"]),
+        param_species=np.array(["H2O"]),
+        active_species=np.array(["H2O"]),
         CIA_pairs=np.array([], dtype=str),
         ff_pairs=np.array([], dtype=str),
         bf_species=np.array([], dtype=str),
-        T_input=np.zeros((50, 1, 1)),
+        chemistry_grid=None,
     )
-    with pytest.raises(NotImplementedError, match="file_read"):
-        _atmosphere.profiles(**cfg)
-
-
-def test_profiles_rejects_chemistry_grid():
-    """profiles() with chemistry_grid != None must raise NotImplementedError."""
-    cfg = _common_atm_args()
-    cfg.update(
-        PT_profile="isotherm", X_profile="isochem",
-        PT_state=np.array([1000.0]),
-        log_X_state=np.zeros((0, 4)),
-        included_species=np.array(["H2"]),
-        bulk_species=np.array(["H2"]),
-        param_species=np.array([], dtype=str),
-        active_species=np.array([], dtype=str),
-        CIA_pairs=np.array([], dtype=str),
-        ff_pairs=np.array([], dtype=str),
-        bf_species=np.array([], dtype=str),
-        chemistry_grid={"dummy": True},
-    )
-    with pytest.raises(NotImplementedError, match="chem_eq"):
+    with pytest.raises(Exception, match="chemistry grid"):
         _atmosphere.profiles(**cfg)
 
 
