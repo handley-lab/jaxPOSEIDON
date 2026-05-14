@@ -1,13 +1,17 @@
 """Instrument convolution + binning — v0 port.
 
-Mirrors `POSEIDON/POSEIDON/instrument.py:321-396` (`make_model_data`) and
-the multi-dataset wrapper at `:399-447` (`bin_spectrum_to_data`).
+Mirrors `POSEIDON/POSEIDON/instrument.py:321-396` (`make_model_data`)
+and the multi-dataset wrapper at `:399-447` (`bin_spectrum_to_data`).
 
 v0 envelope: spectroscopic instruments only (photometric branch
-deferred). The user prepares `(sigma, sensitivity, bin_left, bin_cent,
-bin_right, norm)` via POSEIDON's `init_instrument` (which depends on
-POSEIDON's reference_data instrument sensitivity files) and passes
-them to `make_model_data` here.
+deferred to Phase 0.5.5). The user prepares
+`(sigma, sensitivity, bin_left, bin_cent, bin_right, norm)` via
+`jaxposeidon._instrument_setup.compute_instrument_indices(...)` and
+passes them to `make_model_data` here.
+
+Setup-only `compute_instrument_indices` lives in
+`jaxposeidon._instrument_setup` (extracted Phase 0.5.2a) so this
+module can be JAX-pure under the v1 source-grep gate.
 """
 
 import numpy as np
@@ -18,42 +22,11 @@ try:
 except ImportError:
     from numpy import trapz
 
-
-def compute_instrument_indices(wl, wl_data, half_width, sensitivity, fwhm_um):
-    """v0 spectroscopic equivalent of POSEIDON `instrument.py:191-318`.
-
-    Given the model wavelength grid `wl`, the data bin centres `wl_data`
-    and half-widths, the precomputed instrument sensitivity on the model
-    grid, and the PSF FWHM array (μm), compute the per-bin
-    `(sigma, bin_left, bin_cent, bin_right, norm)` arrays expected by
-    `make_model_data(...)`.
-
-    This is the portion of POSEIDON's `init_instrument` that does NOT
-    require POSEIDON's `reference_data` sensitivity files (those are
-    POSEIDON-package data; the caller can obtain them via POSEIDON's
-    own `init_instrument` and pass `sensitivity` here, or supply a
-    user-provided one).
-
-    Photometric instruments are deferred to v1.
-    """
-    N_bins = len(wl_data)
-    sigma_um = 0.424661 * np.asarray(fwhm_um)  # POSEIDON's PSF σ
-    bin_left = np.zeros(N_bins, dtype=np.int64)
-    bin_cent = np.zeros(N_bins, dtype=np.int64)
-    bin_right = np.zeros(N_bins, dtype=np.int64)
-    sigma = np.zeros(N_bins)
-    norm = np.zeros(N_bins)
-    for n in range(N_bins):
-        bin_left[n] = int(np.argmin(np.abs(wl - (wl_data[n] - half_width[n]))))
-        bin_cent[n] = int(np.argmin(np.abs(wl - wl_data[n])))
-        bin_right[n] = int(np.argmin(np.abs(wl - (wl_data[n] + half_width[n]))))
-        dwl = 0.5 * (wl[bin_cent[n] + 1] - wl[bin_cent[n] - 1])
-        sigma[n] = sigma_um[n] / dwl
-        norm[n] = trapz(
-            sensitivity[bin_left[n] : bin_right[n]],
-            wl[bin_left[n] : bin_right[n]],
-        )
-    return sigma, bin_left, bin_cent, bin_right, norm
+# Back-compat re-export: existing v0 tests and external callers import
+# compute_instrument_indices from jaxposeidon._instruments. Keeping the
+# name here as a re-export avoids breaking the v0 1,435-test gate while
+# the actual implementation lives in the setup-only module.
+from jaxposeidon._instrument_setup import compute_instrument_indices  # noqa: F401
 
 
 def make_model_data(

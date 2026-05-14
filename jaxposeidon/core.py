@@ -39,6 +39,14 @@ from jaxposeidon._instruments import (
 from jaxposeidon._loaddata import init_instrument, load_data
 from jaxposeidon._priors import prior_transform
 from jaxposeidon._retrieval import make_loglikelihood
+from jaxposeidon._setup_api import (
+    create_planet,
+    create_star,
+    define_model,
+    make_atmosphere,
+    read_opacities,
+    wl_grid_constant_R,
+)
 
 __all__ = [
     "compute_spectrum",
@@ -53,4 +61,10 @@ __all__ = [
     "make_loglikelihood",
     "load_data",
     "init_instrument",
+    "create_star",
+    "create_planet",
+    "define_model",
+    "read_opacities",
+    "make_atmosphere",
+    "wl_grid_constant_R",
 ]
