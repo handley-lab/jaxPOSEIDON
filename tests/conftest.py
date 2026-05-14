@@ -15,6 +15,12 @@ that want the *real* opacity database; it skips when
 import os
 import pytest
 
+# POSEIDON.emission reads `block` and `thread` from os.environ at import
+# time (CUDA grid sizing for the GPU planck path). Default them here so
+# tests that import POSEIDON.emission don't KeyError on the lookup.
+os.environ.setdefault("block", "32")
+os.environ.setdefault("thread", "64")
+
 
 @pytest.fixture(scope="session")
 def poseidon_input_data():
