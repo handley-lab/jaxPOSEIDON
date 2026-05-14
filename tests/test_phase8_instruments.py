@@ -532,7 +532,10 @@ def test_loglikelihood_combinatorial_v0_surface(offsets_applied, error_inflation
         offset_end=off_kwargs.get("offset_end", 0),
         ln_prior_TP=ln_prior_TP,
     )
-    np.testing.assert_allclose(ll, expected, atol=0, rtol=0)
+    # FP-precision: order of summation can drift by ~1 ULP on Python 3.12
+    # under certain numpy reduction orders. See sister-test
+    # test_loglikelihood_combinatorial_v0_surface_lumped for the same fix.
+    np.testing.assert_allclose(ll, expected, atol=1e-12, rtol=1e-12)
 
 
 @pytest.mark.parametrize("offsets_applied", ["single_dataset", "two_datasets",
