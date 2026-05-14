@@ -91,7 +91,7 @@ def test_v0_config_accepts_k2_18b_one_offset():
 
 
 @pytest.mark.parametrize("kwargs,err_substring", [
-    (dict(PT_profile="Pelletier", X_profile="isochem",
+    (dict(PT_profile="file_read", X_profile="isochem",
           cloud_model="cloud-free", cloud_dim=1), "PT_profile"),
     (dict(PT_profile="Madhu", X_profile="gradient",
           cloud_model="cloud-free", cloud_dim=1), "X_profile"),
@@ -156,9 +156,10 @@ def test_v0_config_accepts_k2_18b_one_offset():
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           sharp_EM_transition=True), "sharp"),
+    # PT_penalty with non-Pelletier profile is still rejected.
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
-          PT_penalty=True), "PT_penalty"),
+          PT_penalty=True), "Pelletier"),
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           lognormal_logwidth_free=True), "lognormal_logwidth_free"),
