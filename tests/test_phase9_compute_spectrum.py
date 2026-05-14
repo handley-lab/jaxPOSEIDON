@@ -146,37 +146,42 @@ def test_compute_spectrum_rejects_non_transmission_types(spectrum_type):
         )
 
 
-def test_compute_spectrum_transmission_time_average_matches_poseidon():
-    """Phase 0.5.13c: transmission_time_average parity vs POSEIDON.
-
-    Drives the y_p loop in compute_spectrum (POSEIDON core.py:1847-1878)
-    via a 5-point planet-impact-parameter time series.
-    """
+@pytest.mark.parametrize(
+    "y_p",
+    [
+        np.array([-0.4, -0.2, 0.0, 0.2, 0.4]),  # odd
+        np.array([-0.3, -0.1, 0.1, 0.3]),  # even
+        np.array([0.0]),  # single
+    ],
+)
+def test_compute_spectrum_transmission_time_average_matches_poseidon(y_p):
+    """Phase 0.5.13c: transmission_time_average parity vs POSEIDON across
+    odd / even / single y_p lengths."""
     from POSEIDON.core import compute_spectrum as p_compute_spectrum
 
     planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
-    y_p = np.array([-0.4, -0.2, 0.0, 0.2, 0.4])
     ours = j_compute_spectrum(
-        planet,
-        star,
-        model,
-        atmosphere,
-        opac,
-        wl,
-        spectrum_type="transmission_time_average",
-        y_p=y_p,
+        planet, star, model, atmosphere, opac, wl,
+        spectrum_type="transmission_time_average", y_p=y_p,
     )
     theirs = p_compute_spectrum(
-        planet,
-        star,
-        model,
-        atmosphere,
-        opac,
-        wl,
-        spectrum_type="transmission_time_average",
-        y_p=y_p,
+        planet, star, model, atmosphere, opac, wl,
+        spectrum_type="transmission_time_average", y_p=y_p,
     )
     np.testing.assert_array_equal(ours, theirs)
+
+
+def test_compute_spectrum_transmission_time_average_unphysical_atmosphere():
+    """NaN sentinel must apply equally to transmission_time_average."""
+    planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
+    atmosphere["is_physical"] = False
+    out = j_compute_spectrum(
+        planet, star, model, atmosphere, opac, wl,
+        spectrum_type="transmission_time_average",
+        y_p=np.array([-0.2, 0.0, 0.2]),
+    )
+    assert out.shape == wl.shape
+    assert np.all(np.isnan(out))
 
 
 def test_compute_spectrum_rejects_gpu_device():

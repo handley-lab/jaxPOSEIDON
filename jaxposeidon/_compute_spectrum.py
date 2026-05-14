@@ -5,10 +5,10 @@ Faithful port of the v0-supported portion of POSEIDON `core.py:1303-2132`
 
     atmosphere → extinction → TRIDENT → spectrum
 
-v0 envelope:
-- spectrum_type='transmission' only (emission/reflection/direct/dayside/
-  nightside/time-average raise NotImplementedError; the post-load_data
-  hot path for retrievals never asks for those in the K2-18 b config).
+Supported envelope:
+- spectrum_type in {'transmission', 'transmission_time_average'};
+  emission / reflection / direct / dayside / nightside dispatch is the
+  Phase 0.5.13c follow-up.
 - opacity_treatment='opacity_sampling' only (line-by-line LBL is v1).
 - device='cpu' only.
 - cloud_model in {'cloud-free', 'MacMad17'} only (Mie/eddysed v1).
