@@ -71,7 +71,7 @@ jobs:
           # jaxposeidon's pin. --no-deps on POSEIDON avoids it dragging
           # numpy<2 back in.
           # setuptools<81 still bundles pkg_resources, which pysynphot needs.
-          pip install "setuptools<81" spectres mpi4py miepython pymultinest h5py pandas matplotlib astropy
+          pip install "setuptools<81" spectres mpi4py miepython pymultinest h5py pandas matplotlib astropy scikit-learn cmasher batman-package
           pip install --no-deps git+https://github.com/MartianColonist/POSEIDON
           # Stub pysynphot + pymultinest. The real pysynphot uses np.alltrue
           # (removed in numpy 2.0) at import time; the real pymultinest needs
