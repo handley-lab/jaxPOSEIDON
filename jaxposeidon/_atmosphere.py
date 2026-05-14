@@ -617,7 +617,7 @@ def profiles(
         T_rough = compute_T_slope(
             P, T_phot, Delta_T_arr, log_P_slope_phot, log_P_slope_arr
         )
-        smooth_width = round(0.3 / (((np.log10(P[0]) - np.log10(P[-1])) / len(P))))
+        smooth_width = round(0.3 / ((np.log10(P[0]) - np.log10(P[-1])) / len(P)))
         T = gauss_conv(T_rough, sigma=smooth_width, axis=0, mode="nearest")
     elif PT_profile == "Pelletier":
         T_points = PT_state[:-1] if PT_penalty else PT_state

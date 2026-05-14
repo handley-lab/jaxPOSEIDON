@@ -142,7 +142,7 @@ def _profiles_assert_match(cfg):
         cfg.get("disable_atmosphere", False),
     )
     assert len(ours) == len(theirs) == 13
-    for i, (a, b) in enumerate(zip(ours, theirs)):
+    for i, (a, b) in enumerate(zip(ours, theirs, strict=True)):
         if isinstance(a, (bool, np.bool_)) or isinstance(b, (bool, np.bool_)):
             assert a == b, f"physical-flag mismatch at index {i}: {a} vs {b}"
         else:
@@ -253,7 +253,7 @@ def test_assign_free_params_full_tuple_matches_poseidon(PT_profile, extra):
     ours = assign_free_params(**kw)
     theirs = _poseidon_assign(PT_profile=PT_profile, **extra)
     assert len(ours) == len(theirs)
-    for i, (a, b) in enumerate(zip(ours, theirs)):
+    for i, (a, b) in enumerate(zip(ours, theirs, strict=True)):
         np.testing.assert_array_equal(a, b, err_msg=f"tuple element {i} differs")
 
 
