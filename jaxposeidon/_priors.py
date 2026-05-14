@@ -44,13 +44,14 @@ def prior_transform(unit_cube, param_names, prior_types, prior_ranges):
         elif ptype == "sine":
             max_value = prange[1]
             if parameter in ("alpha", "beta"):
-                cube[i] = (180.0 / np.pi) * 2.0 * np.arcsin(
-                    cube[i] * np.sin((np.pi / 180.0) * (max_value / 2.0))
+                cube[i] = (
+                    (180.0 / np.pi)
+                    * 2.0
+                    * np.arcsin(cube[i] * np.sin((np.pi / 180.0) * (max_value / 2.0)))
                 )
             elif parameter == "theta_0":
                 cube[i] = (180.0 / np.pi) * np.arcsin(
-                    (2.0 * cube[i] - 1.0)
-                    * np.sin((np.pi / 180.0) * (max_value / 2.0))
+                    (2.0 * cube[i] - 1.0) * np.sin((np.pi / 180.0) * (max_value / 2.0))
                 )
             else:
                 raise NotImplementedError(

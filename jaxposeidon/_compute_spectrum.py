@@ -43,13 +43,25 @@ _V0_CLOUD_TYPES = {"deck", "haze", "deck_haze"}
 _V0_CLOUD_DIMS = {1, 2}
 
 
-def compute_spectrum(planet, star, model, atmosphere, opac, wl,
-                     spectrum_type="transmission", save_spectrum=False,
-                     disable_continuum=False, suppress_print=False,
-                     Gauss_quad=2, use_photosphere_radius=True,
-                     device="cpu", y_p=np.array([0.0]),
-                     return_albedo=False,
-                     kappa_contributions=(), cloud_properties_contributions=()):
+def compute_spectrum(
+    planet,
+    star,
+    model,
+    atmosphere,
+    opac,
+    wl,
+    spectrum_type="transmission",
+    save_spectrum=False,
+    disable_continuum=False,
+    suppress_print=False,
+    Gauss_quad=2,
+    use_photosphere_radius=True,
+    device="cpu",
+    y_p=np.array([0.0]),
+    return_albedo=False,
+    kappa_contributions=(),
+    cloud_properties_contributions=(),
+):
     """v0 transmission orchestrator.
 
     Mirrors POSEIDON `core.py:1303-2132` filtered to the transmission /
@@ -78,9 +90,7 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
             f"spectrum_type={spectrum_type!r} (only 'transmission' in v0)"
         )
     if opac["opacity_treatment"] != "opacity_sampling":
-        raise NotImplementedError(
-            "opacity_treatment='line_by_line' deferred to v1"
-        )
+        raise NotImplementedError("opacity_treatment='line_by_line' deferred to v1")
     if model.get("thermal_scattering") or model.get("reflection"):
         raise NotImplementedError("thermal_scattering / reflection are v1")
     if model.get("surface"):
@@ -102,8 +112,7 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
         cloud_dim = model.get("cloud_dim", 1)
         if cloud_dim not in _V0_CLOUD_DIMS:
             raise NotImplementedError(
-                f"cloud_dim={cloud_dim!r} is v1 (v0 supports "
-                f"{sorted(_V0_CLOUD_DIMS)})"
+                f"cloud_dim={cloud_dim!r} is v1 (v0 supports {sorted(_V0_CLOUD_DIMS)})"
             )
 
     # --- physical-atmosphere check is the LAST guard before computation ---
@@ -147,8 +156,11 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
     bf_species = model["bf_species"]
 
     enable_haze = 1 if "haze" in model["cloud_type"] else 0
-    enable_deck = (1 if ("deck" in model["cloud_type"]
-                          and "Mie" not in model["cloud_model"]) else 0)
+    enable_deck = (
+        1
+        if ("deck" in model["cloud_type"] and "Mie" not in model["cloud_model"])
+        else 0
+    )
 
     # ----- POSEIDON `core.py:1651-1683` numba-placeholder n_aerosol / σ_ext --
     n_aerosol = np.array([np.zeros_like(r)])
@@ -168,25 +180,61 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
 
     # ----- Phase 4: runtime extinction ---------------------------------------
     kappa_gas, kappa_Ray, kappa_cloud, _kappa_sep = extinction(
-        chemical_species, active_species, CIA_pairs, ff_pairs, bf_species,
-        n, T, P, wl, X, X_active, X_CIA, X_ff, X_bf,
-        a, gamma, P_cloud, kappa_cloud_0,
-        sigma_stored, CIA_stored, Rayleigh_stored, ff_stored, bf_stored,
-        enable_haze, enable_deck, enable_surface=0,
-        N_sectors=N_sectors, N_zones=N_zones,
-        T_fine=T_fine, log_P_fine=log_P_fine, P_surf=P_surf,
-        enable_Mie=0, n_aerosol_array=n_aerosol,
+        chemical_species,
+        active_species,
+        CIA_pairs,
+        ff_pairs,
+        bf_species,
+        n,
+        T,
+        P,
+        wl,
+        X,
+        X_active,
+        X_CIA,
+        X_ff,
+        X_bf,
+        a,
+        gamma,
+        P_cloud,
+        kappa_cloud_0,
+        sigma_stored,
+        CIA_stored,
+        Rayleigh_stored,
+        ff_stored,
+        bf_stored,
+        enable_haze,
+        enable_deck,
+        enable_surface=0,
+        N_sectors=N_sectors,
+        N_zones=N_zones,
+        T_fine=T_fine,
+        log_P_fine=log_P_fine,
+        P_surf=P_surf,
+        enable_Mie=0,
+        n_aerosol_array=n_aerosol,
         sigma_Mie_array=sigma_ext_cloud,
     )
 
     # ----- Phase 7: TRIDENT (POSEIDON core.py:1841-1844) ---------------------
     spectrum = TRIDENT(
-        P=P, r=r, r_up=r_up, r_low=r_low, dr=dr, wl=wl,
+        P=P,
+        r=r,
+        r_up=r_up,
+        r_low=r_low,
+        dr=dr,
+        wl=wl,
         kappa_clear=(kappa_gas + kappa_Ray),
         kappa_cloud=kappa_cloud,
-        enable_deck=enable_deck, enable_haze=enable_haze,
-        b_p=b_p, y_p=y_p[0], R_s=R_s,
-        f_cloud=f_cloud, phi_0=phi_cloud_0, theta_0=theta_cloud_0,
-        phi_edge=phi_edge, theta_edge=theta_edge,
+        enable_deck=enable_deck,
+        enable_haze=enable_haze,
+        b_p=b_p,
+        y_p=y_p[0],
+        R_s=R_s,
+        f_cloud=f_cloud,
+        phi_0=phi_cloud_0,
+        theta_0=theta_cloud_0,
+        phi_edge=phi_edge,
+        theta_edge=theta_edge,
     )
     return spectrum

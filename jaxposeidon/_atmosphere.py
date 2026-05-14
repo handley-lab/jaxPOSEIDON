@@ -23,8 +23,8 @@ import numpy as np
 import scipy.constants as sc
 from scipy.ndimage import gaussian_filter1d
 
-from jaxposeidon._species_data import masses as _masses, inactive_species as _INACTIVE_SPECIES_LOCAL
-
+from jaxposeidon._species_data import inactive_species as _INACTIVE_SPECIES_LOCAL
+from jaxposeidon._species_data import masses as _masses
 
 # ---------------------------------------------------------------------------
 # v0 envelope check for profiles(...)
@@ -118,13 +118,14 @@ def compute_X_isochem_1D(P, log_X_state, N_sectors, N_zones, param_species):
     X_profiles = np.zeros(shape=(N_param_species, N_layers, N_sectors, N_zones))
     for q in range(N_param_species):
         log_X_bar_term, _Delta_term, _Delta_DN, _log_X_deep = log_X_state[q, :]
-        X = 10.0 ** log_X_bar_term
+        X = 10.0**log_X_bar_term
         X_profiles[q, :, :, :] = X
     return X_profiles
 
 
-def add_bulk_component(P, T, X_param, N_species, N_sectors, N_zones,
-                      bulk_species, He_fraction):
+def add_bulk_component(
+    P, T, X_param, N_species, N_sectors, N_zones, bulk_species, He_fraction
+):
     """Concatenate bulk species mixing ratios so the columns sum to 1.
 
     Mirrors `POSEIDON/atmosphere.py:1221-1330` for the v0-supported
@@ -207,17 +208,21 @@ def radial_profiles(P, T, g_0, R_p, P_ref, R_p_ref, mu, N_sectors, N_zones):
             r_0 = R_p_ref
             i_ref = int(np.argmin(np.abs(P - P_0)))
             r[i_ref, j, k] = r_0
-            integrand = (sc.k * T[:, j, k]) / (R_p ** 2 * g_0 * mu[:, j, k])
+            integrand = (sc.k * T[:, j, k]) / (R_p**2 * g_0 * mu[:, j, k])
 
             integral_out = 0.0
             integral_in = 0.0
 
             for i in range(i_ref + 1, N_layers):
-                integral_out += 0.5 * (integrand[i] + integrand[i - 1]) * (log_P[i] - log_P[i - 1])
+                integral_out += (
+                    0.5 * (integrand[i] + integrand[i - 1]) * (log_P[i] - log_P[i - 1])
+                )
                 r[i, j, k] = 1.0 / ((1.0 / r_0) + integral_out)
 
             for i in range(i_ref - 1, -1, -1):
-                integral_in += 0.5 * (integrand[i] + integrand[i + 1]) * (log_P[i] - log_P[i + 1])
+                integral_in += (
+                    0.5 * (integrand[i] + integrand[i + 1]) * (log_P[i] - log_P[i + 1])
+                )
                 r[i, j, k] = 1.0 / ((1.0 / r_0) + integral_in)
 
             for i in range(1, N_layers - 1):
@@ -234,9 +239,7 @@ def radial_profiles(P, T, g_0, R_p, P_ref, R_p_ref, mu, N_sectors, N_zones):
                 r[N_layers - 1, j, k] + r[N_layers - 2, j, k]
             )
             dr[0, j, k] = r[1, j, k] - r[0, j, k]
-            dr[N_layers - 1, j, k] = (
-                r[N_layers - 1, j, k] - r[N_layers - 2, j, k]
-            )
+            dr[N_layers - 1, j, k] = r[N_layers - 1, j, k] - r[N_layers - 2, j, k]
 
     return n, r, r_up, r_low, dr
 
@@ -250,8 +253,17 @@ def radial_profiles(P, T, g_0, R_p, P_ref, R_p_ref, mu, N_sectors, N_zones):
 _INACTIVE_SPECIES = _INACTIVE_SPECIES_LOCAL
 
 
-def mixing_ratio_categories(P, X, N_sectors, N_zones, included_species,
-                            active_species, CIA_pairs, ff_pairs, bf_species):
+def mixing_ratio_categories(
+    P,
+    X,
+    N_sectors,
+    N_zones,
+    included_species,
+    active_species,
+    CIA_pairs,
+    ff_pairs,
+    bf_species,
+):
     """Slice the full X array into active / CIA / ff / bf categories.
 
     Mirrors POSEIDON `atmosphere.py:1722-1813`. Used by `profiles(...)`
@@ -318,11 +330,15 @@ def radial_profiles_constant_g(P, T, g_0, P_ref, R_p_ref, mu, N_sectors, N_zones
             integrand = (sc.k * T[:, j, k]) / (g_0 * mu[:, j, k])
 
             for i in range(i_ref + 1, N_layers):
-                integral_out += 0.5 * (integrand[i] + integrand[i - 1]) * (log_P[i] - log_P[i - 1])
+                integral_out += (
+                    0.5 * (integrand[i] + integrand[i - 1]) * (log_P[i] - log_P[i - 1])
+                )
                 r[i, j, k] = r_0 - integral_out
 
             for i in range(i_ref - 1, -1, -1):
-                integral_in += 0.5 * (integrand[i] + integrand[i + 1]) * (log_P[i] - log_P[i + 1])
+                integral_in += (
+                    0.5 * (integrand[i] + integrand[i + 1]) * (log_P[i] - log_P[i + 1])
+                )
                 r[i, j, k] = r_0 - integral_in
 
             for i in range(1, N_layers - 1):
@@ -339,9 +355,7 @@ def radial_profiles_constant_g(P, T, g_0, P_ref, R_p_ref, mu, N_sectors, N_zones
                 r[N_layers - 1, j, k] + r[N_layers - 2, j, k]
             )
             dr[0, j, k] = r[1, j, k] - r[0, j, k]
-            dr[N_layers - 1, j, k] = (
-                r[N_layers - 1, j, k] - r[N_layers - 2, j, k]
-            )
+            dr[N_layers - 1, j, k] = r[N_layers - 1, j, k] - r[N_layers - 2, j, k]
 
     return n, r, r_up, r_low, dr
 
@@ -349,18 +363,44 @@ def radial_profiles_constant_g(P, T, g_0, P_ref, R_p_ref, mu, N_sectors, N_zones
 # ---------------------------------------------------------------------------
 # profiles() — v0 top-level dispatcher
 # ---------------------------------------------------------------------------
-def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
-             log_X_state, included_species, bulk_species, param_species,
-             active_species, CIA_pairs, ff_pairs, bf_species,
-             N_sectors, N_zones, alpha, beta, phi, theta,
-             species_vert_gradient, He_fraction,
-             T_input=None, X_input=None, P_param_set=1.0e-6,
-             log_P_slope_phot=0.5,
-             log_P_slope_arr=(-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0),
-             Na_K_fixed_ratio=False,
-             constant_gravity=False, chemistry_grid=None,
-             PT_penalty=False, T_eq=None, mu_back=None,
-             disable_atmosphere=False):
+def profiles(
+    P,
+    R_p,
+    g_0,
+    PT_profile,
+    X_profile,
+    PT_state,
+    P_ref,
+    R_p_ref,
+    log_X_state,
+    included_species,
+    bulk_species,
+    param_species,
+    active_species,
+    CIA_pairs,
+    ff_pairs,
+    bf_species,
+    N_sectors,
+    N_zones,
+    alpha,
+    beta,
+    phi,
+    theta,
+    species_vert_gradient,
+    He_fraction,
+    T_input=None,
+    X_input=None,
+    P_param_set=1.0e-6,
+    log_P_slope_phot=0.5,
+    log_P_slope_arr=(-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0),
+    Na_K_fixed_ratio=False,
+    constant_gravity=False,
+    chemistry_grid=None,
+    PT_penalty=False,
+    T_eq=None,
+    mu_back=None,
+    disable_atmosphere=False,
+):
     """v0 port of POSEIDON `atmosphere.py:profiles(...)` (2015-2493).
 
     Returns the same 13-tuple POSEIDON does:
@@ -411,29 +451,33 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
         T = T_rough
     else:
         if len(PT_state) != 6:
-            raise NotImplementedError(
-                "v0 Madhu requires PT_dim=1 (len(PT_state)==6)"
-            )
+            raise NotImplementedError("v0 Madhu requires PT_dim=1 (len(PT_state)==6)")
         a1, a2, log_P1, log_P2, log_P3, T_set = PT_state
         if (log_P3 < log_P2) or (log_P3 < log_P1):
             return (0,) * 12 + (False,)
-        T_rough = compute_T_Madhu(P, a1, a2, log_P1, log_P2, log_P3, T_set,
-                                  P_param_set)
+        T_rough = compute_T_Madhu(P, a1, a2, log_P1, log_P2, log_P3, T_set, P_param_set)
         T = gauss_conv(T_rough, sigma=3, axis=0, mode="nearest")
 
-    X_param = compute_X_isochem_1D(P, log_X_state, N_sectors, N_zones,
-                                    param_species)
+    X_param = compute_X_isochem_1D(P, log_X_state, N_sectors, N_zones, param_species)
 
     N_species = len(included_species)
-    X = add_bulk_component(P, T, X_param, N_species, N_sectors, N_zones,
-                           bulk_species, He_fraction)
+    X = add_bulk_component(
+        P, T, X_param, N_species, N_sectors, N_zones, bulk_species, He_fraction
+    )
 
     if np.any(X[0, :, :, :] < 0.0):
         return (0,) * 12 + (False,)
 
     X_active, X_CIA, X_ff, X_bf = mixing_ratio_categories(
-        P, X, N_sectors, N_zones, included_species,
-        active_species, CIA_pairs, ff_pairs, bf_species,
+        P,
+        X,
+        N_sectors,
+        N_zones,
+        included_species,
+        active_species,
+        CIA_pairs,
+        ff_pairs,
+        bf_species,
     )
 
     masses_all = np.zeros(N_species)
@@ -446,11 +490,26 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
 
     if constant_gravity:
         n, r, r_up, r_low, dr = radial_profiles_constant_g(
-            P, T, g_0, P_ref, R_p_ref, mu, N_sectors, N_zones,
+            P,
+            T,
+            g_0,
+            P_ref,
+            R_p_ref,
+            mu,
+            N_sectors,
+            N_zones,
         )
     else:
         n, r, r_up, r_low, dr = radial_profiles(
-            P, T, g_0, R_p, P_ref, R_p_ref, mu, N_sectors, N_zones,
+            P,
+            T,
+            g_0,
+            R_p,
+            P_ref,
+            R_p_ref,
+            mu,
+            N_sectors,
+            N_zones,
         )
 
     if np.any(r < 0.0):

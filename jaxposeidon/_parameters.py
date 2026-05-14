@@ -27,7 +27,6 @@ oracle and for the K2-18b one-offset retrieval.
 
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # v0 configuration whitelist
 # ---------------------------------------------------------------------------
@@ -41,27 +40,39 @@ V0_OFFSETS = {None, "single_dataset", "two_datasets", "three_datasets"}
 V0_ERROR_INFLATIONS = {None, "Line15", "Piette20", "Line15+Piette20"}
 
 
-def assert_v0_model_config(*, PT_profile, X_profile, cloud_model, cloud_dim,
-                           PT_dim=1, X_dim=1, Atmosphere_dimension=1,
-                           cloud_type="deck",
-                           reference_parameter="R_p_ref",
-                           object_type="transiting",
-                           gravity_setting="fixed", mass_setting="fixed",
-                           bulk_species=("H2",),
-                           stellar_contam=None,
-                           offsets_applied=None,
-                           error_inflation=None,
-                           surface=False, surface_model="gray",
-                           high_res_method=None,
-                           opaque_Iceberg=False, aerosol_species=(),
-                           species_EM_gradient=(),
-                           species_DN_gradient=(),
-                           species_vert_gradient=(),
-                           TwoD_type=None, disable_atmosphere=False,
-                           sharp_DN_transition=False,
-                           sharp_EM_transition=False,
-                           PT_penalty=False,
-                           lognormal_logwidth_free=False):
+def assert_v0_model_config(
+    *,
+    PT_profile,
+    X_profile,
+    cloud_model,
+    cloud_dim,
+    PT_dim=1,
+    X_dim=1,
+    Atmosphere_dimension=1,
+    cloud_type="deck",
+    reference_parameter="R_p_ref",
+    object_type="transiting",
+    gravity_setting="fixed",
+    mass_setting="fixed",
+    bulk_species=("H2",),
+    stellar_contam=None,
+    offsets_applied=None,
+    error_inflation=None,
+    surface=False,
+    surface_model="gray",
+    high_res_method=None,
+    opaque_Iceberg=False,
+    aerosol_species=(),
+    species_EM_gradient=(),
+    species_DN_gradient=(),
+    species_vert_gradient=(),
+    TwoD_type=None,
+    disable_atmosphere=False,
+    sharp_DN_transition=False,
+    sharp_EM_transition=False,
+    PT_penalty=False,
+    lognormal_logwidth_free=False,
+):
     """Raise NotImplementedError for any configuration outside the v0 envelope.
 
     Accepts every primary and secondary tuning knob from POSEIDON's
@@ -126,9 +137,7 @@ def assert_v0_model_config(*, PT_profile, X_profile, cloud_model, cloud_dim,
             f"({sorted(o for o in V0_OFFSETS if o is not None) + [None]})"
         )
     if error_inflation not in V0_ERROR_INFLATIONS:
-        raise NotImplementedError(
-            f"error_inflation={error_inflation!r} not in v0"
-        )
+        raise NotImplementedError(f"error_inflation={error_inflation!r} not in v0")
     if surface:
         raise NotImplementedError("Surfaces are deferred to v1")
     if surface_model not in ("gray", "constant", "lab_data"):
@@ -141,8 +150,11 @@ def assert_v0_model_config(*, PT_profile, X_profile, cloud_model, cloud_dim,
         raise NotImplementedError("High-resolution mode is deferred to v1")
     if opaque_Iceberg or list(aerosol_species):
         raise NotImplementedError("Iceberg/Mie aerosols are deferred to v1")
-    if (list(species_EM_gradient) or list(species_DN_gradient)
-            or list(species_vert_gradient)):
+    if (
+        list(species_EM_gradient)
+        or list(species_DN_gradient)
+        or list(species_vert_gradient)
+    ):
         raise NotImplementedError("v0 forbids per-species chemistry gradients")
     if TwoD_type is not None:
         raise NotImplementedError("v0 forbids TwoD_type")
@@ -186,10 +198,14 @@ def assign_free_params(
     stellar_contam=None,
     offsets_applied=None,
     error_inflation=None,
-    PT_dim=1, X_dim=1, cloud_dim=1,
+    PT_dim=1,
+    X_dim=1,
+    cloud_dim=1,
     TwoD_type=None,
     TwoD_param_scheme="difference",
-    species_EM_gradient=(), species_DN_gradient=(), species_vert_gradient=(),
+    species_EM_gradient=(),
+    species_DN_gradient=(),
+    species_vert_gradient=(),
     Atmosphere_dimension=1,
     opaque_Iceberg=False,
     surface=False,
@@ -224,25 +240,32 @@ def assign_free_params(
          N_params_cumulative)
     """
     assert_v0_model_config(
-        PT_profile=PT_profile, X_profile=X_profile,
-        cloud_model=cloud_model, cloud_dim=cloud_dim,
+        PT_profile=PT_profile,
+        X_profile=X_profile,
+        cloud_model=cloud_model,
+        cloud_dim=cloud_dim,
         cloud_type=cloud_type,
-        PT_dim=PT_dim, X_dim=X_dim,
+        PT_dim=PT_dim,
+        X_dim=X_dim,
         Atmosphere_dimension=Atmosphere_dimension,
         reference_parameter=reference_parameter,
         object_type=object_type,
-        gravity_setting=gravity_setting, mass_setting=mass_setting,
+        gravity_setting=gravity_setting,
+        mass_setting=mass_setting,
         bulk_species=bulk_species,
         stellar_contam=stellar_contam,
         offsets_applied=offsets_applied,
         error_inflation=error_inflation,
-        surface=surface, surface_model=surface_model,
+        surface=surface,
+        surface_model=surface_model,
         high_res_method=high_res_method,
-        opaque_Iceberg=opaque_Iceberg, aerosol_species=aerosol_species,
+        opaque_Iceberg=opaque_Iceberg,
+        aerosol_species=aerosol_species,
         species_EM_gradient=species_EM_gradient,
         species_DN_gradient=species_DN_gradient,
         species_vert_gradient=species_vert_gradient,
-        TwoD_type=TwoD_type, disable_atmosphere=disable_atmosphere,
+        TwoD_type=TwoD_type,
+        disable_atmosphere=disable_atmosphere,
         sharp_DN_transition=sharp_DN_transition,
         sharp_EM_transition=sharp_EM_transition,
         PT_penalty=PT_penalty,
@@ -250,11 +273,20 @@ def assign_free_params(
     )
     # Inert tuning kwargs (only meaningful under deferred branches) are
     # accepted and ignored; their values do not affect v0 parameter ordering.
-    _ = (TwoD_param_scheme, log_P_slope_arr, number_P_knots,
-         alpha_high_res_option, fix_alpha_high_res, fix_W_conv_high_res,
-         fix_beta_high_res, fix_Delta_phi_high_res,
-         surface_components, surface_percentage_option,
-         thermal, reflection)
+    _ = (
+        TwoD_param_scheme,
+        log_P_slope_arr,
+        number_P_knots,
+        alpha_high_res_option,
+        fix_alpha_high_res,
+        fix_W_conv_high_res,
+        fix_beta_high_res,
+        fix_Delta_phi_high_res,
+        surface_components,
+        surface_percentage_option,
+        thermal,
+        reflection,
+    )
 
     params = []
     physical_params = []
@@ -355,15 +387,33 @@ def assign_free_params(
     high_res_params = np.array(high_res_params)
     surface_params = np.array(surface_params)
 
-    N_params_cumulative = np.cumsum([
-        N_physical_params, N_PT_params, N_species_params, N_cloud_params,
-        N_geometry_params, N_stellar_params, N_offset_params, N_error_params,
-        N_high_res_params, N_surface_params,
-    ])
+    N_params_cumulative = np.cumsum(
+        [
+            N_physical_params,
+            N_PT_params,
+            N_species_params,
+            N_cloud_params,
+            N_geometry_params,
+            N_stellar_params,
+            N_offset_params,
+            N_error_params,
+            N_high_res_params,
+            N_surface_params,
+        ]
+    )
 
-    return (params, physical_params, PT_params, X_params, cloud_params,
-            geometry_params, stellar_params, high_res_params, surface_params,
-            N_params_cumulative)
+    return (
+        params,
+        physical_params,
+        PT_params,
+        X_params,
+        cloud_params,
+        geometry_params,
+        stellar_params,
+        high_res_params,
+        surface_params,
+        N_params_cumulative,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -378,14 +428,14 @@ def split_params(params_drawn, N_params_cumulative):
         surface_drawn.
     """
     return (
-        params_drawn[0:N_params_cumulative[0]],
-        params_drawn[N_params_cumulative[0]:N_params_cumulative[1]],
-        params_drawn[N_params_cumulative[1]:N_params_cumulative[2]],
-        params_drawn[N_params_cumulative[2]:N_params_cumulative[3]],
-        params_drawn[N_params_cumulative[3]:N_params_cumulative[4]],
-        params_drawn[N_params_cumulative[4]:N_params_cumulative[5]],
-        params_drawn[N_params_cumulative[5]:N_params_cumulative[6]],
-        params_drawn[N_params_cumulative[6]:N_params_cumulative[7]],
-        params_drawn[N_params_cumulative[7]:N_params_cumulative[8]],
-        params_drawn[N_params_cumulative[8]:N_params_cumulative[9]],
+        params_drawn[0 : N_params_cumulative[0]],
+        params_drawn[N_params_cumulative[0] : N_params_cumulative[1]],
+        params_drawn[N_params_cumulative[1] : N_params_cumulative[2]],
+        params_drawn[N_params_cumulative[2] : N_params_cumulative[3]],
+        params_drawn[N_params_cumulative[3] : N_params_cumulative[4]],
+        params_drawn[N_params_cumulative[4] : N_params_cumulative[5]],
+        params_drawn[N_params_cumulative[5] : N_params_cumulative[6]],
+        params_drawn[N_params_cumulative[6] : N_params_cumulative[7]],
+        params_drawn[N_params_cumulative[7] : N_params_cumulative[8]],
+        params_drawn[N_params_cumulative[8] : N_params_cumulative[9]],
     )

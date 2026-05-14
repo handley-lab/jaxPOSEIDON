@@ -12,6 +12,7 @@ them to `make_model_data` here.
 
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
+
 try:
     from numpy import trapezoid as trapz
 except ImportError:
@@ -49,14 +50,23 @@ def compute_instrument_indices(wl, wl_data, half_width, sensitivity, fwhm_um):
         dwl = 0.5 * (wl[bin_cent[n] + 1] - wl[bin_cent[n] - 1])
         sigma[n] = sigma_um[n] / dwl
         norm[n] = trapz(
-            sensitivity[bin_left[n]:bin_right[n]],
-            wl[bin_left[n]:bin_right[n]],
+            sensitivity[bin_left[n] : bin_right[n]],
+            wl[bin_left[n] : bin_right[n]],
         )
     return sigma, bin_left, bin_cent, bin_right, norm
 
 
-def make_model_data(spectrum, wl, sigma, sensitivity, bin_left, bin_cent,
-                    bin_right, norm, photometric=False):
+def make_model_data(
+    spectrum,
+    wl,
+    sigma,
+    sensitivity,
+    bin_left,
+    bin_cent,
+    bin_right,
+    norm,
+    photometric=False,
+):
     """Bin a fine-grid spectrum to data wavelengths via PSF convolution +
     sensitivity-weighted integration.
 
@@ -76,16 +86,16 @@ def make_model_data(spectrum, wl, sigma, sensitivity, bin_left, bin_cent,
             spectrum[slice_lo:slice_hi], sigma=sigma[n], mode="nearest"
         )
         if len(spectrum_conv[extension:-extension]) != len(
-            sensitivity[bin_left[n]:bin_right[n]]
+            sensitivity[bin_left[n] : bin_right[n]]
         ):
             raise Exception(
                 "Error: Model wavelength range not wide enough to encompass all data."
             )
         integrand = (
             spectrum_conv[extension:-extension]
-            * sensitivity[bin_left[n]:bin_right[n]]
+            * sensitivity[bin_left[n] : bin_right[n]]
         )
-        data[n] = trapz(integrand, wl[bin_left[n]:bin_right[n]])
+        data[n] = trapz(integrand, wl[bin_left[n] : bin_right[n]])
         ymodel[n] = data[n] / norm[n]
     return ymodel
 
@@ -112,9 +122,10 @@ def bin_spectrum_to_data(spectrum, wl, data_properties):
         idx_1 = data_properties["len_data_idx"][i]
         idx_2 = data_properties["len_data_idx"][i + 1]
         ymodel_i = make_model_data(
-            spectrum, wl,
+            spectrum,
+            wl,
             data_properties["psf_sigma"][idx_1:idx_2],
-            data_properties["sens"][i * N_wl:(i + 1) * N_wl],
+            data_properties["sens"][i * N_wl : (i + 1) * N_wl],
             data_properties["bin_left"][idx_1:idx_2],
             data_properties["bin_cent"][idx_1:idx_2],
             data_properties["bin_right"][idx_1:idx_2],

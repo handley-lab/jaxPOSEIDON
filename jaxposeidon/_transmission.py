@@ -37,13 +37,14 @@ from jaxposeidon._opacity_precompute import prior_index
 
 def area_overlap_circles(d, r_1, r_2):
     """Analytic overlap area of two circles (port of transmission.py:690-719)."""
-    d_sq = d ** 2
-    r_1_sq = r_1 ** 2
-    r_2_sq = r_2 ** 2
+    d_sq = d**2
+    r_1_sq = r_1**2
+    r_2_sq = r_2**2
     phi_1 = np.arccos((d_sq + r_1_sq - r_2_sq) / (2 * d * r_1))
     phi_2 = np.arccos((d_sq + r_2_sq - r_1_sq) / (2 * d * r_2))
-    return (r_1_sq * (phi_1 - 0.5 * np.sin(2.0 * phi_1))
-            + r_2_sq * (phi_2 - 0.5 * np.sin(2.0 * phi_2)))
+    return r_1_sq * (phi_1 - 0.5 * np.sin(2.0 * phi_1)) + r_2_sq * (
+        phi_2 - 0.5 * np.sin(2.0 * phi_2)
+    )
 
 
 def delta_ray_geom(N_phi, N_b, b, b_p, y_p, phi_grid, R_s_sq):
@@ -51,15 +52,24 @@ def delta_ray_geom(N_phi, N_b, b, b_p, y_p, phi_grid, R_s_sq):
     delta_ray = np.zeros((N_b, N_phi))
     for j in range(N_phi):
         for i in range(N_b):
-            d_ij_sq = (b[i] ** 2 + b_p ** 2 + y_p ** 2
-                       + 2.0 * b[i] * (b_p * np.cos(phi_grid[j] - np.pi / 2.0)
-                                        + y_p * np.sin(phi_grid[j] - np.pi / 2.0)))
+            d_ij_sq = (
+                b[i] ** 2
+                + b_p**2
+                + y_p**2
+                + 2.0
+                * b[i]
+                * (
+                    b_p * np.cos(phi_grid[j] - np.pi / 2.0)
+                    + y_p * np.sin(phi_grid[j] - np.pi / 2.0)
+                )
+            )
             delta_ray[i, j] = 1.0 if d_ij_sq <= R_s_sq else 0.0
     return delta_ray
 
 
-def zone_boundaries(N_b, N_sectors, N_zones, b, r_up, k_zone_back,
-                    theta_edge_min, theta_edge_max):
+def zone_boundaries(
+    N_b, N_sectors, N_zones, b, r_up, k_zone_back, theta_edge_min, theta_edge_max
+):
     """Port of `transmission.py:13-83`."""
     r_min = np.zeros((N_b, N_sectors, N_zones))
     r_max = np.zeros((N_b, N_sectors, N_zones))
@@ -79,9 +89,20 @@ def zone_boundaries(N_b, N_sectors, N_zones, b, r_up, k_zone_back,
     return r_min, r_max
 
 
-def extend_rad_transfer_grids(phi_edge, theta_edge, R_s, d, R_max, f_cloud,
-                               phi_0, theta_0, N_sectors_back, N_zones_back,
-                               enable_deck, N_phi_max=36):
+def extend_rad_transfer_grids(
+    phi_edge,
+    theta_edge,
+    R_s,
+    d,
+    R_max,
+    f_cloud,
+    phi_0,
+    theta_0,
+    N_sectors_back,
+    N_zones_back,
+    enable_deck,
+    N_phi_max=36,
+):
     """Port of `transmission.py:289-529`."""
     phi_edge_N = np.pi / 2.0 + phi_edge[:-1]
     phi_edge_S = (-1.0 * phi_edge_N)[::-1] + 2.0 * np.pi
@@ -151,14 +172,37 @@ def extend_rad_transfer_grids(phi_edge, theta_edge, R_s, d, R_max, f_cloud,
         j_sector[j] = j_sector_in
         j_sector_back[j] = j_sector_back_in
 
-    return (phi_grid, dphi_grid, theta_grid, theta_edge_all,
-            N_sectors, N_zones, N_phi, j_sector, j_sector_back,
-            k_zone_back, cloudy_sectors, cloudy_zones)
+    return (
+        phi_grid,
+        dphi_grid,
+        theta_grid,
+        theta_edge_all,
+        N_sectors,
+        N_zones,
+        N_phi,
+        j_sector,
+        j_sector_back,
+        k_zone_back,
+        cloudy_sectors,
+        cloudy_zones,
+    )
 
 
-def path_distribution_geometric(b, r_up, r_low, dr, i_bot, j_sector_back,
-                                 N_layers, N_sectors_back, N_zones_back,
-                                 N_zones, N_phi, k_zone_back, theta_edge_all):
+def path_distribution_geometric(
+    b,
+    r_up,
+    r_low,
+    dr,
+    i_bot,
+    j_sector_back,
+    N_layers,
+    N_sectors_back,
+    N_zones_back,
+    N_zones,
+    N_phi,
+    k_zone_back,
+    theta_edge_all,
+):
     """Port of `transmission.py:87-285`."""
     N_b = b.shape[0]
     Path = np.zeros((N_b, N_phi, N_zones, N_layers))
@@ -184,8 +228,14 @@ def path_distribution_geometric(b, r_up, r_low, dr, i_bot, j_sector_back,
                                 if b[i] > r_low[l, j_sector_back_in, k]:
                                     s2 = 0.0
                                 else:
-                                    s2 = np.sqrt(r_low_sq[l, j_sector_back_in, k] - b_sq[i])
-                                Path[i, j, k, l] = symmetry_factor * (s1 - s2) / dr[l, j_sector_back_in, k]
+                                    s2 = np.sqrt(
+                                        r_low_sq[l, j_sector_back_in, k] - b_sq[i]
+                                    )
+                                Path[i, j, k, l] = (
+                                    symmetry_factor
+                                    * (s1 - s2)
+                                    / dr[l, j_sector_back_in, k]
+                                )
                             else:
                                 Path[i, j, k, l] = 0.0
             else:
@@ -194,8 +244,16 @@ def path_distribution_geometric(b, r_up, r_low, dr, i_bot, j_sector_back,
     else:
         theta_edge_max = np.delete(theta_edge_all, np.where(theta_edge_all == 0.0)[0])
         theta_edge_min = np.sort(np.append(theta_edge_all[1:-1], 0.0))
-        r_min, r_max = zone_boundaries(N_b, N_sectors_back, N_zones, b, r_up,
-                                        k_zone_back, theta_edge_min, theta_edge_max)
+        r_min, r_max = zone_boundaries(
+            N_b,
+            N_sectors_back,
+            N_zones,
+            b,
+            r_up,
+            k_zone_back,
+            theta_edge_min,
+            theta_edge_max,
+        )
         r_min_sq = r_min * r_min
         r_max_sq = r_max * r_max
         j_sector_last = -1
@@ -206,33 +264,70 @@ def path_distribution_geometric(b, r_up, r_low, dr, i_bot, j_sector_back,
                     k_in = k_zone_back[k]
                     for i in range(N_b):
                         for l in range(i_bot, N_layers):
-                            if ((r_low[l, j_sector_back_in, k_in] >= r_max[i, j_sector_back_in, k]) or
-                                (r_up[l, j_sector_back_in, k_in] <= r_min[i, j_sector_back_in, k]) or
-                                (b[i] >= r_max[i, j_sector_back_in, k])):
+                            if (
+                                (
+                                    r_low[l, j_sector_back_in, k_in]
+                                    >= r_max[i, j_sector_back_in, k]
+                                )
+                                or (
+                                    r_up[l, j_sector_back_in, k_in]
+                                    <= r_min[i, j_sector_back_in, k]
+                                )
+                                or (b[i] >= r_max[i, j_sector_back_in, k])
+                            ):
                                 Path[i, j, k, l] = 0.0
                             else:
-                                if r_up[l, j_sector_back_in, k_in] >= r_max[i, j_sector_back_in, k]:
-                                    s1 = np.sqrt(r_max_sq[i, j_sector_back_in, k] - b_sq[i])
+                                if (
+                                    r_up[l, j_sector_back_in, k_in]
+                                    >= r_max[i, j_sector_back_in, k]
+                                ):
+                                    s1 = np.sqrt(
+                                        r_max_sq[i, j_sector_back_in, k] - b_sq[i]
+                                    )
                                     s2 = 0.0
                                 else:
-                                    s2 = np.sqrt(r_up_sq[l, j_sector_back_in, k_in] - b_sq[i])
+                                    s2 = np.sqrt(
+                                        r_up_sq[l, j_sector_back_in, k_in] - b_sq[i]
+                                    )
                                     s1 = 0.0
-                                if r_low[l, j_sector_back_in, k_in] > r_min[i, j_sector_back_in, k]:
-                                    s3 = np.sqrt(r_low_sq[l, j_sector_back_in, k_in] - b_sq[i])
+                                if (
+                                    r_low[l, j_sector_back_in, k_in]
+                                    > r_min[i, j_sector_back_in, k]
+                                ):
+                                    s3 = np.sqrt(
+                                        r_low_sq[l, j_sector_back_in, k_in] - b_sq[i]
+                                    )
                                     s4 = 0.0
                                 else:
-                                    s4 = np.sqrt(r_min_sq[i, j_sector_back_in, k] - b_sq[i])
+                                    s4 = np.sqrt(
+                                        r_min_sq[i, j_sector_back_in, k] - b_sq[i]
+                                    )
                                     s3 = 0.0
-                                Path[i, j, k, l] = symmetry_factor * (s1 + s2 - s3 - s4) / dr[l, j_sector_back_in, k_in]
+                                Path[i, j, k, l] = (
+                                    symmetry_factor
+                                    * (s1 + s2 - s3 - s4)
+                                    / dr[l, j_sector_back_in, k_in]
+                                )
             else:
                 Path[:, j, :, :] = Path[:, j - 1, :, :]
             j_sector_last = j_sector_back_in
     return Path
 
 
-def compute_tau_vert(N_phi, N_layers, N_zones, N_wl, j_sector, j_sector_back,
-                     k_zone_back, cloudy_zones, cloudy_sectors, kappa_clear,
-                     kappa_cloud, dr):
+def compute_tau_vert(
+    N_phi,
+    N_layers,
+    N_zones,
+    N_wl,
+    j_sector,
+    j_sector_back,
+    k_zone_back,
+    cloudy_zones,
+    cloudy_sectors,
+    kappa_clear,
+    kappa_cloud,
+    dr,
+):
     """Port of `transmission.py:533-630`."""
     tau_vert = np.zeros((N_layers, N_phi, N_zones, N_wl))
     for j in range(N_phi):
@@ -245,10 +340,9 @@ def compute_tau_vert(N_phi, N_layers, N_zones, N_wl, j_sector, j_sector_back,
                 if cloudy_zones[k] == 1 and cloudy_sectors[j_sector_in] == 1:
                     for q in range(N_wl):
                         tau_vert[:, j, k, q] = (
-                            (kappa_clear[:, j_sector_back_in, k_zone_back_in, q]
-                             + kappa_cloud[:, j_sector_back_in, k_zone_back_in, q])
-                            * dr[:, j_sector_back_in, k_zone_back_in]
-                        )
+                            kappa_clear[:, j_sector_back_in, k_zone_back_in, q]
+                            + kappa_cloud[:, j_sector_back_in, k_zone_back_in, q]
+                        ) * dr[:, j_sector_back_in, k_zone_back_in]
                 else:
                     for q in range(N_wl):
                         tau_vert[:, j, k, q] = (
@@ -261,11 +355,28 @@ def compute_tau_vert(N_phi, N_layers, N_zones, N_wl, j_sector, j_sector_back,
     return tau_vert
 
 
-def TRIDENT(P, r, r_up, r_low, dr, wl, kappa_clear, kappa_cloud,
-            enable_deck, enable_haze, b_p, y_p, R_s,
-            f_cloud, phi_0, theta_0, phi_edge, theta_edge):
+def TRIDENT(
+    P,
+    r,
+    r_up,
+    r_low,
+    dr,
+    wl,
+    kappa_clear,
+    kappa_cloud,
+    enable_deck,
+    enable_haze,
+    b_p,
+    y_p,
+    R_s,
+    f_cloud,
+    phi_0,
+    theta_0,
+    phi_edge,
+    theta_edge,
+):
     """Port of `transmission.py:722-944`."""
-    d_sq = b_p ** 2 + y_p ** 2
+    d_sq = b_p**2 + y_p**2
     d = np.sqrt(d_sq)
     N_wl = len(wl)
     R_s_sq = R_s * R_s
@@ -280,11 +391,31 @@ def TRIDENT(P, r, r_up, r_low, dr, wl, kappa_clear, kappa_cloud,
     N_sectors_back = r.shape[1]
     N_zones_back = r.shape[2]
 
-    (phi_grid, dphi_grid, theta_grid, theta_edge_all,
-     N_sectors, N_zones, N_phi, j_sector, j_sector_back,
-     k_zone_back, cloudy_sectors, cloudy_zones) = extend_rad_transfer_grids(
-        phi_edge, theta_edge, R_s, d, R_max, f_cloud, phi_0, theta_0,
-        N_sectors_back, N_zones_back, enable_deck,
+    (
+        phi_grid,
+        dphi_grid,
+        theta_grid,
+        theta_edge_all,
+        N_sectors,
+        N_zones,
+        N_phi,
+        j_sector,
+        j_sector_back,
+        k_zone_back,
+        cloudy_sectors,
+        cloudy_zones,
+    ) = extend_rad_transfer_grids(
+        phi_edge,
+        theta_edge,
+        R_s,
+        d,
+        R_max,
+        f_cloud,
+        phi_0,
+        theta_0,
+        N_sectors_back,
+        N_zones_back,
+        enable_deck,
     )
 
     if d >= (R_s + R_max):
@@ -294,8 +425,9 @@ def TRIDENT(P, r, r_up, r_low, dr, wl, kappa_clear, kappa_cloud,
     else:
         phi_1 = np.arccos((d_sq + R_max_sq - R_s_sq) / (2 * d * R_max))
         phi_2 = np.arccos((d_sq + R_s_sq - R_max_sq) / (2 * d * R_s))
-        A_overlap = (R_max_sq * (phi_1 - 0.5 * np.sin(2.0 * phi_1))
-                     + R_s_sq * (phi_2 - 0.5 * np.sin(2.0 * phi_2)))
+        A_overlap = R_max_sq * (phi_1 - 0.5 * np.sin(2.0 * phi_1)) + R_s_sq * (
+            phi_2 - 0.5 * np.sin(2.0 * phi_2)
+        )
 
     delta_ray = delta_ray_geom(N_phi, N_b, b, b_p, y_p, phi_grid, R_s_sq)
 
@@ -311,14 +443,34 @@ def TRIDENT(P, r, r_up, r_low, dr, wl, kappa_clear, kappa_cloud,
         dA_atm_overlap = delta_ray * dA_atm
 
     Path = path_distribution_geometric(
-        b, r_up, r_low, dr, i_bot, j_sector_back,
-        N_layers, N_sectors_back, N_zones_back, N_zones, N_phi,
-        k_zone_back, theta_edge_all,
+        b,
+        r_up,
+        r_low,
+        dr,
+        i_bot,
+        j_sector_back,
+        N_layers,
+        N_sectors_back,
+        N_zones_back,
+        N_zones,
+        N_phi,
+        k_zone_back,
+        theta_edge_all,
     )
 
     tau_vert = compute_tau_vert(
-        N_phi, N_layers, N_zones, N_wl, j_sector, j_sector_back,
-        k_zone_back, cloudy_zones, cloudy_sectors, kappa_clear, kappa_cloud, dr,
+        N_phi,
+        N_layers,
+        N_zones,
+        N_wl,
+        j_sector,
+        j_sector_back,
+        k_zone_back,
+        cloudy_zones,
+        cloudy_sectors,
+        kappa_clear,
+        kappa_cloud,
+        dr,
     )
 
     Trans = np.zeros((N_b, N_phi, N_wl))
@@ -327,8 +479,10 @@ def TRIDENT(P, r, r_up, r_low, dr, wl, kappa_clear, kappa_cloud,
         j_sector_in = j_sector[j]
         if j_sector_in != j_sector_last:
             Trans[:, j, :] = np.exp(
-                -1.0 * np.tensordot(Path[:, j, :, :], tau_vert[:, j, :, :],
-                                     axes=([2, 1], [0, 1]))
+                -1.0
+                * np.tensordot(
+                    Path[:, j, :, :], tau_vert[:, j, :, :], axes=([2, 1], [0, 1])
+                )
             )
         else:
             Trans[:, j, :] = Trans[:, j - 1, :]

@@ -76,9 +76,20 @@ def closest_index(value, grid_start, grid_end, N_grid):
 # ---------------------------------------------------------------------------
 # Pressure + wavelength preprocessing for molecular opacity
 # ---------------------------------------------------------------------------
-def P_interpolate_wl_initialise_sigma(N_P_fine, N_T, N_P, N_wl, log_sigma,
-                                       x, nu_model, b1, b2, nu_opac, N_nu,
-                                       wl_interp="sample"):
+def P_interpolate_wl_initialise_sigma(
+    N_P_fine,
+    N_T,
+    N_P,
+    N_wl,
+    log_sigma,
+    x,
+    nu_model,
+    b1,
+    b2,
+    nu_opac,
+    N_nu,
+    wl_interp="sample",
+):
     """Interpolate log10(σ)[log_P, T, ν] → σ[log_P_fine, T, λ_model].
 
     Bit-exact port of POSEIDON `absorption.py:28-134`. Supports
@@ -120,9 +131,11 @@ def P_interpolate_wl_initialise_sigma(N_P_fine, N_T, N_P, N_wl, log_sigma,
                     if x[i] == -1:
                         sigma_pre_inp[i, j, (N_wl - 1) - k] = 10 ** log_sigma[0, j, z]
                     elif x[i] == -2:
-                        sigma_pre_inp[i, j, (N_wl - 1) - k] = 10 ** log_sigma[N_P - 1, j, z]
+                        sigma_pre_inp[i, j, (N_wl - 1) - k] = (
+                            10 ** log_sigma[N_P - 1, j, z]
+                        )
                     else:
-                        reduced_sigma = log_sigma[x[i]:x[i] + 2, j, z]
+                        reduced_sigma = log_sigma[x[i] : x[i] + 2, j, z]
                         sigma_pre_inp[i, j, (N_wl - 1) - k] = 10 ** (
                             b1[i] * reduced_sigma[0] + b2[i] * reduced_sigma[1]
                         )
@@ -137,11 +150,13 @@ def P_interpolate_wl_initialise_sigma(N_P_fine, N_T, N_P, N_wl, log_sigma,
                             + c2 * log_sigma[N_P - 1, j, z + 1]
                         )
                     else:
-                        log_sigma_rect = log_sigma[x[i]:x[i] + 2, j, z:z + 2]
-                        log_sigma_nu_1 = (b1[i] * log_sigma_rect[0, 0]
-                                          + b2[i] * log_sigma_rect[1, 0])
-                        log_sigma_nu_2 = (b1[i] * log_sigma_rect[0, 1]
-                                          + b2[i] * log_sigma_rect[1, 1])
+                        log_sigma_rect = log_sigma[x[i] : x[i] + 2, j, z : z + 2]
+                        log_sigma_nu_1 = (
+                            b1[i] * log_sigma_rect[0, 0] + b2[i] * log_sigma_rect[1, 0]
+                        )
+                        log_sigma_nu_2 = (
+                            b1[i] * log_sigma_rect[0, 1] + b2[i] * log_sigma_rect[1, 1]
+                        )
                         sigma_pre_inp[i, j, (N_wl - 1) - k] = 10 ** (
                             c1 * log_sigma_nu_1 + c2 * log_sigma_nu_2
                         )
@@ -149,8 +164,9 @@ def P_interpolate_wl_initialise_sigma(N_P_fine, N_T, N_P, N_wl, log_sigma,
     return sigma_pre_inp
 
 
-def wl_initialise_cia(N_T_cia, N_wl, log_cia, nu_model, nu_cia, N_nu,
-                      wl_interp="sample"):
+def wl_initialise_cia(
+    N_T_cia, N_wl, log_cia, nu_model, nu_cia, N_nu, wl_interp="sample"
+):
     """Interpolate log10(α_CIA)[T, ν] → α[T, λ_model].
 
     Bit-exact port of POSEIDON `absorption.py:138-200`.
@@ -216,8 +232,9 @@ def T_interpolation_init(N_T_fine, T_grid, T_fine, y):
     return w_T
 
 
-def T_interpolate_sigma(N_P_fine, N_T_fine, N_T, N_wl, sigma_pre_inp, T_grid,
-                        T_fine, y, w_T):
+def T_interpolate_sigma(
+    N_P_fine, N_T_fine, N_T, N_wl, sigma_pre_inp, T_grid, T_fine, y, w_T
+):
     """Interpolate σ from coarse T_grid onto T_fine (1/T-weighted geom mean).
 
     Bit-exact port of POSEIDON `absorption.py:240-279`.
@@ -235,15 +252,13 @@ def T_interpolate_sigma(N_P_fine, N_T_fine, N_T, N_wl, sigma_pre_inp, T_grid,
                 T2 = T_grid[y[j] + 1]
                 sig_1 = sigma_pre_inp[i, y[j], :]
                 sig_2 = sigma_pre_inp[i, y[j] + 1, :]
-                sigma_inp[i, j, :] = (
-                    np.power(sig_1, w_T[j] * ((1.0 / T2) - (1.0 / T)))
-                    * np.power(sig_2, w_T[j] * ((1.0 / T) - (1.0 / T1)))
-                )
+                sigma_inp[i, j, :] = np.power(
+                    sig_1, w_T[j] * ((1.0 / T2) - (1.0 / T))
+                ) * np.power(sig_2, w_T[j] * ((1.0 / T) - (1.0 / T1)))
     return sigma_inp
 
 
-def T_interpolate_cia(N_T_fine, N_T_cia, N_wl, cia_pre_inp, T_grid_cia,
-                      T_fine, y, w_T):
+def T_interpolate_cia(N_T_fine, N_T_cia, N_wl, cia_pre_inp, T_grid_cia, T_fine, y, w_T):
     """Interpolate CIA α from coarse T_grid_cia onto T_fine.
 
     Bit-exact port of POSEIDON `absorption.py:283-322`.
@@ -260,8 +275,7 @@ def T_interpolate_cia(N_T_fine, N_T_cia, N_wl, cia_pre_inp, T_grid_cia,
             T2 = T_grid_cia[y[j] + 1]
             cia_1 = cia_pre_inp[y[j], :]
             cia_2 = cia_pre_inp[y[j] + 1, :]
-            cia_inp[j, :] = (
-                np.power(cia_1, w_T[j] * ((1.0 / T2) - (1.0 / T)))
-                * np.power(cia_2, w_T[j] * ((1.0 / T) - (1.0 / T1)))
-            )
+            cia_inp[j, :] = np.power(
+                cia_1, w_T[j] * ((1.0 / T2) - (1.0 / T))
+            ) * np.power(cia_2, w_T[j] * ((1.0 / T) - (1.0 / T1)))
     return cia_inp

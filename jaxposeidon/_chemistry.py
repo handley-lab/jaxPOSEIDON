@@ -25,6 +25,4 @@ def interpolate_log_X_grid(*args, **kwargs):
 
 def load_chemistry_grid(*args, **kwargs):
     """FastChem grid loader — deferred to v1."""
-    raise NotImplementedError(
-        "FastChem chemistry grid loading is deferred to v1."
-    )
+    raise NotImplementedError("FastChem chemistry grid loading is deferred to v1.")

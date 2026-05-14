@@ -17,11 +17,19 @@ Reject NaN-bearing spectra with the same -1e100 sentinel POSEIDON uses
 import numpy as np
 
 
-def apply_offsets(ydata, offset_params, offsets_applied,
-                  offset_start, offset_end,
-                  offset_1_start=0, offset_1_end=0,
-                  offset_2_start=0, offset_2_end=0,
-                  offset_3_start=0, offset_3_end=0):
+def apply_offsets(
+    ydata,
+    offset_params,
+    offsets_applied,
+    offset_start,
+    offset_end,
+    offset_1_start=0,
+    offset_1_end=0,
+    offset_2_start=0,
+    offset_2_end=0,
+    offset_3_start=0,
+    offset_3_end=0,
+):
     """Apply per-dataset ppm-scale offsets to the observed transit depths.
 
     Mirrors POSEIDON `retrieval.py:1124-1174`. `offset_params` is the
@@ -36,49 +44,48 @@ def apply_offsets(ydata, offset_params, offsets_applied,
             ydata_adjusted[offset_start:offset_end] -= offset_params[0] * 1e-6
         else:
             for n in range(len(offset_1_start)):
-                ydata_adjusted[offset_1_start[n]:offset_1_end[n]] -= (
+                ydata_adjusted[offset_1_start[n] : offset_1_end[n]] -= (
                     offset_params[0] * 1e-6
                 )
     elif offsets_applied == "two_datasets":
         if np.isscalar(offset_1_start) and offset_1_start == 0:
-            ydata_adjusted[offset_start[0]:offset_end[0]] -= offset_params[0] * 1e-6
-            ydata_adjusted[offset_start[1]:offset_end[1]] -= offset_params[1] * 1e-6
+            ydata_adjusted[offset_start[0] : offset_end[0]] -= offset_params[0] * 1e-6
+            ydata_adjusted[offset_start[1] : offset_end[1]] -= offset_params[1] * 1e-6
         else:
             for n in range(len(offset_1_start)):
-                ydata_adjusted[offset_1_start[n]:offset_1_end[n]] -= (
+                ydata_adjusted[offset_1_start[n] : offset_1_end[n]] -= (
                     offset_params[0] * 1e-6
                 )
             for m in range(len(offset_2_start)):
-                ydata_adjusted[offset_2_start[m]:offset_2_end[m]] -= (
+                ydata_adjusted[offset_2_start[m] : offset_2_end[m]] -= (
                     offset_params[1] * 1e-6
                 )
     elif offsets_applied == "three_datasets":
         if np.isscalar(offset_1_start) and offset_1_start == 0:
-            ydata_adjusted[offset_start[0]:offset_end[0]] -= offset_params[0] * 1e-6
-            ydata_adjusted[offset_start[1]:offset_end[1]] -= offset_params[1] * 1e-6
-            ydata_adjusted[offset_start[2]:offset_end[2]] -= offset_params[2] * 1e-6
+            ydata_adjusted[offset_start[0] : offset_end[0]] -= offset_params[0] * 1e-6
+            ydata_adjusted[offset_start[1] : offset_end[1]] -= offset_params[1] * 1e-6
+            ydata_adjusted[offset_start[2] : offset_end[2]] -= offset_params[2] * 1e-6
         else:
             for n in range(len(offset_1_start)):
-                ydata_adjusted[offset_1_start[n]:offset_1_end[n]] -= (
+                ydata_adjusted[offset_1_start[n] : offset_1_end[n]] -= (
                     offset_params[0] * 1e-6
                 )
             for m in range(len(offset_2_start)):
-                ydata_adjusted[offset_2_start[m]:offset_2_end[m]] -= (
+                ydata_adjusted[offset_2_start[m] : offset_2_end[m]] -= (
                     offset_params[1] * 1e-6
                 )
             for s in range(len(offset_3_start)):
-                ydata_adjusted[offset_3_start[s]:offset_3_end[s]] -= (
+                ydata_adjusted[offset_3_start[s] : offset_3_end[s]] -= (
                     offset_params[2] * 1e-6
                 )
     else:
-        raise NotImplementedError(
-            f"offsets_applied={offsets_applied!r} not in v0"
-        )
+        raise NotImplementedError(f"offsets_applied={offsets_applied!r} not in v0")
     return ydata_adjusted
 
 
-def effective_error_sq(err_data, ymodel, err_inflation_params, error_inflation,
-                       norm_log_default=0.0):
+def effective_error_sq(
+    err_data, ymodel, err_inflation_params, error_inflation, norm_log_default=0.0
+):
     """Compute (err_eff_sq, norm_log) per POSEIDON `retrieval.py:1097-1110`."""
     if error_inflation is None:
         return err_data * err_data, norm_log_default
@@ -93,21 +100,31 @@ def effective_error_sq(err_data, ymodel, err_inflation_params, error_inflation,
             + (err_inflation_params[1] * ymodel) ** 2
         )
     else:
-        raise NotImplementedError(
-            f"error_inflation={error_inflation!r} not in v0"
-        )
+        raise NotImplementedError(f"error_inflation={error_inflation!r} not in v0")
     norm_log = (-0.5 * np.log(2.0 * np.pi * err_eff_sq)).sum()
     return err_eff_sq, norm_log
 
 
-def loglikelihood(ymodel, ydata, err_data, *,
-                  offset_params=(), err_inflation_params=(),
-                  offsets_applied=None, error_inflation=None,
-                  offset_start=0, offset_end=0,
-                  offset_1_start=0, offset_1_end=0,
-                  offset_2_start=0, offset_2_end=0,
-                  offset_3_start=0, offset_3_end=0,
-                  norm_log_default=None, ln_prior_TP=0.0):
+def loglikelihood(
+    ymodel,
+    ydata,
+    err_data,
+    *,
+    offset_params=(),
+    err_inflation_params=(),
+    offsets_applied=None,
+    error_inflation=None,
+    offset_start=0,
+    offset_end=0,
+    offset_1_start=0,
+    offset_1_end=0,
+    offset_2_start=0,
+    offset_2_end=0,
+    offset_3_start=0,
+    offset_3_end=0,
+    norm_log_default=None,
+    ln_prior_TP=0.0,
+):
     """Gaussian likelihood with optional offsets + error inflation.
 
     Mirrors POSEIDON `retrieval.py:1065-1183` for the v0 envelope.
@@ -128,16 +145,25 @@ def loglikelihood(ymodel, ydata, err_data, *,
         norm_log_default = 0.0
 
     err_eff_sq, norm_log = effective_error_sq(
-        err_data, ymodel, np.asarray(err_inflation_params),
-        error_inflation, norm_log_default,
+        err_data,
+        ymodel,
+        np.asarray(err_inflation_params),
+        error_inflation,
+        norm_log_default,
     )
 
     ydata_adjusted = apply_offsets(
-        ydata, np.asarray(offset_params), offsets_applied,
-        offset_start, offset_end,
-        offset_1_start, offset_1_end,
-        offset_2_start, offset_2_end,
-        offset_3_start, offset_3_end,
+        ydata,
+        np.asarray(offset_params),
+        offsets_applied,
+        offset_start,
+        offset_end,
+        offset_1_start,
+        offset_1_end,
+        offset_2_start,
+        offset_2_end,
+        offset_3_start,
+        offset_3_end,
     )
 
     ll = (-0.5 * (ymodel - ydata_adjusted) ** 2 / err_eff_sq).sum() + norm_log

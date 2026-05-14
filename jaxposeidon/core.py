@@ -23,17 +23,22 @@ to use POSEIDON directly until those phases land.
 """
 
 from jaxposeidon._compute_spectrum import (
-    compute_spectrum, check_atmosphere_physical,
-)
-from jaxposeidon._instruments import (
-    bin_spectrum_to_data, make_model_data, compute_instrument_indices,
+    check_atmosphere_physical,
+    compute_spectrum,
 )
 from jaxposeidon._data import (
-    loglikelihood, apply_offsets, effective_error_sq,
+    apply_offsets,
+    effective_error_sq,
+    loglikelihood,
 )
+from jaxposeidon._instruments import (
+    bin_spectrum_to_data,
+    compute_instrument_indices,
+    make_model_data,
+)
+from jaxposeidon._loaddata import init_instrument, load_data
 from jaxposeidon._priors import prior_transform
 from jaxposeidon._retrieval import make_loglikelihood
-from jaxposeidon._loaddata import load_data, init_instrument
 
 __all__ = [
     "compute_spectrum",

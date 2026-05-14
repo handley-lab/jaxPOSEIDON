@@ -8,8 +8,9 @@ Faithful port of POSEIDON's `geometry.py:12-253` for the v0 envelope:
 import numpy as np
 
 
-def atmosphere_regions(Atmosphere_dimension, TwoD_type=None,
-                       N_slice_EM=2, N_slice_DN=2):
+def atmosphere_regions(
+    Atmosphere_dimension, TwoD_type=None, N_slice_EM=2, N_slice_DN=2
+):
     """Number of azimuthal sectors / zenith zones for the background atmosphere.
 
     Mirrors POSEIDON `geometry.py:12-87` for the 1D case.
@@ -21,10 +22,16 @@ def atmosphere_regions(Atmosphere_dimension, TwoD_type=None,
     return 1, 1
 
 
-def angular_grids(Atmosphere_dimension, TwoD_type=None,
-                  N_slice_EM=2, N_slice_DN=2,
-                  alpha=0.0, beta=0.0,
-                  sharp_DN_transition=False, sharp_EM_transition=False):
+def angular_grids(
+    Atmosphere_dimension,
+    TwoD_type=None,
+    N_slice_EM=2,
+    N_slice_DN=2,
+    alpha=0.0,
+    beta=0.0,
+    sharp_DN_transition=False,
+    sharp_EM_transition=False,
+):
     """phi, theta, phi_edge, theta_edge, dphi, dtheta for 1D atmospheres.
 
     Mirrors POSEIDON `geometry.py:90-253`. For 1D, edges are placed in the

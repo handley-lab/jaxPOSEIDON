@@ -21,8 +21,9 @@ already rejects them with NotImplementedError).
 import numpy as np
 
 
-def unpack_MacMad17_cloud_params(*, clouds_in, cloud_param_names,
-                                  cloud_type, cloud_dim):
+def unpack_MacMad17_cloud_params(
+    *, clouds_in, cloud_param_names, cloud_type, cloud_dim
+):
     """v0 MacMad17 cloud parameter unpacking.
 
     Args:
@@ -57,26 +58,20 @@ def unpack_MacMad17_cloud_params(*, clouds_in, cloud_param_names,
     kappa_cloud_0 = 1.0e250
 
     if enable_haze == 1:
-        a = 10.0 ** clouds_in[
-            int(np.where(cloud_param_names == "log_a")[0][0])
-        ]
-        gamma = clouds_in[
-            int(np.where(cloud_param_names == "gamma")[0][0])
-        ]
+        a = 10.0 ** clouds_in[int(np.where(cloud_param_names == "log_a")[0][0])]
+        gamma = clouds_in[int(np.where(cloud_param_names == "gamma")[0][0])]
     else:
         a, gamma = 1.0, -4.0
 
     if enable_deck == 1:
-        P_cloud = 10.0 ** clouds_in[
-            int(np.where(cloud_param_names == "log_P_cloud")[0][0])
-        ]
+        P_cloud = (
+            10.0 ** clouds_in[int(np.where(cloud_param_names == "log_P_cloud")[0][0])]
+        )
     else:
         P_cloud = 100.0
 
     if cloud_dim != 1:
-        phi_c = clouds_in[
-            int(np.where(cloud_param_names == "phi_cloud")[0][0])
-        ]
+        phi_c = clouds_in[int(np.where(cloud_param_names == "phi_cloud")[0][0])]
         phi_0 = 0.0
         f_cloud = phi_c
         theta_0 = -90.0
@@ -92,9 +87,13 @@ def unpack_MacMad17_cloud_params(*, clouds_in, cloud_param_names,
     # ndarray before passing to `extinction(...)` which indexes
     # `P_cloud[0]`.
     return dict(
-        a=float(a), gamma=float(gamma),
+        a=float(a),
+        gamma=float(gamma),
         P_cloud=float(P_cloud),
         kappa_cloud_0=float(kappa_cloud_0),
-        f_cloud=float(f_cloud), phi_0=float(phi_0), theta_0=float(theta_0),
-        enable_haze=enable_haze, enable_deck=enable_deck,
+        f_cloud=float(f_cloud),
+        phi_0=float(phi_0),
+        theta_0=float(theta_0),
+        enable_haze=enable_haze,
+        enable_deck=enable_deck,
     )

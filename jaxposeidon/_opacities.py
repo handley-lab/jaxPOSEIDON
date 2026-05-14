@@ -24,13 +24,43 @@ import numpy as np
 from jaxposeidon._opacity_precompute import closest_index
 
 
-def extinction(chemical_species, active_species, cia_pairs, ff_pairs, bf_species,
-               n, T, P, wl, X, X_active, X_cia, X_ff, X_bf,
-               a, gamma, P_cloud, kappa_cloud_0,
-               sigma_stored, cia_stored, Rayleigh_stored, ff_stored, bf_stored,
-               enable_haze, enable_deck, enable_surface,
-               N_sectors, N_zones, T_fine, log_P_fine, P_surf,
-               enable_Mie, n_aerosol_array, sigma_Mie_array, P_deep=1000.0):
+def extinction(
+    chemical_species,
+    active_species,
+    cia_pairs,
+    ff_pairs,
+    bf_species,
+    n,
+    T,
+    P,
+    wl,
+    X,
+    X_active,
+    X_cia,
+    X_ff,
+    X_bf,
+    a,
+    gamma,
+    P_cloud,
+    kappa_cloud_0,
+    sigma_stored,
+    cia_stored,
+    Rayleigh_stored,
+    ff_stored,
+    bf_stored,
+    enable_haze,
+    enable_deck,
+    enable_surface,
+    N_sectors,
+    N_zones,
+    T_fine,
+    log_P_fine,
+    P_surf,
+    enable_Mie,
+    n_aerosol_array,
+    sigma_Mie_array,
+    P_deep=1000.0,
+):
     """Compute kappa_gas, kappa_Ray, kappa_cloud arrays.
 
     Bit-exact port of POSEIDON `absorption.py:1034-1227` for the v0
@@ -70,9 +100,9 @@ def extinction(chemical_species, active_species, cia_pairs, ff_pairs, bf_species
             for i in range(i_bot, N_layers):
                 n_level = n[i, j, k]
                 idx_T_fine = closest_index(T[i, j, k], T_fine[0], T_fine[-1], N_T_fine)
-                idx_P_fine = closest_index(np.log10(P[i]),
-                                            log_P_fine[0], log_P_fine[-1],
-                                            N_P_fine)
+                idx_P_fine = closest_index(
+                    np.log10(P[i]), log_P_fine[0], log_P_fine[-1], N_P_fine
+                )
 
                 for q in range(N_cia_pairs):
                     n_cia_1 = n_level * X_cia[0, q, i, j, k]
@@ -82,7 +112,9 @@ def extinction(chemical_species, active_species, cia_pairs, ff_pairs, bf_species
 
                 for q in range(N_species_active):
                     n_q = n_level * X_active[q, i, j, k]
-                    kappa_gas[i, j, k, :] += n_q * sigma_stored[q, idx_P_fine, idx_T_fine, :]
+                    kappa_gas[i, j, k, :] += (
+                        n_q * sigma_stored[q, idx_P_fine, idx_T_fine, :]
+                    )
 
                 for q in range(N_species):
                     n_q = n_level * X[q, i, j, k]
@@ -94,6 +126,6 @@ def extinction(chemical_species, active_species, cia_pairs, ff_pairs, bf_species
                     kappa_cloud[i, j, k, :] += haze_amp * slope
 
             if enable_deck == 1:
-                kappa_cloud[P > P_cloud[0], j, k, :] += kappa_cloud_0
+                kappa_cloud[P_cloud[0] < P, j, k, :] += kappa_cloud_0
 
     return kappa_gas, kappa_Ray, kappa_cloud, kappa_cloud_separate

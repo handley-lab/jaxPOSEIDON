@@ -25,24 +25,35 @@ the forward model is JAX-traced.
 
 import numpy as np
 
-from jaxposeidon._priors import prior_transform
 from jaxposeidon._compute_spectrum import compute_spectrum
-from jaxposeidon._instruments import bin_spectrum_to_data
 from jaxposeidon._data import loglikelihood
-
+from jaxposeidon._instruments import bin_spectrum_to_data
+from jaxposeidon._priors import prior_transform
 
 _V0_REFERENCE_PARAMETERS = {"R_p_ref", "P_ref", "R_p_ref+P_ref"}
 
 
-def make_loglikelihood(planet, star, model, opac, wl, data_properties,
-                       split_params, make_atmosphere,
-                       param_names, prior_types, prior_ranges,
-                       *,
-                       P,
-                       reference_parameter="R_p_ref",
-                       R_p_ref_fixed=None, log_P_ref_fixed=None,
-                       offsets_applied=None, error_inflation=None,
-                       N_params_cum=None):
+def make_loglikelihood(
+    planet,
+    star,
+    model,
+    opac,
+    wl,
+    data_properties,
+    split_params,
+    make_atmosphere,
+    param_names,
+    prior_types,
+    prior_ranges,
+    *,
+    P,
+    reference_parameter="R_p_ref",
+    R_p_ref_fixed=None,
+    log_P_ref_fixed=None,
+    offsets_applied=None,
+    error_inflation=None,
+    N_params_cum=None,
+):
     """Build a closure cube → log-posterior over the v0 retrieval envelope.
 
     Reference-parameter handling (per Phase 1 v0 envelope):
@@ -66,16 +77,23 @@ def make_loglikelihood(planet, star, model, opac, wl, data_properties,
     if reference_parameter == "P_ref" and R_p_ref_fixed is None:
         raise ValueError("reference_parameter='P_ref' requires R_p_ref_fixed")
     if reference_parameter == "R_p_ref" and log_P_ref_fixed is None:
-        raise ValueError(
-            "reference_parameter='R_p_ref' requires log_P_ref_fixed"
-        )
+        raise ValueError("reference_parameter='R_p_ref' requires log_P_ref_fixed")
 
     def logp(unit_cube):
         physical = prior_transform(
-            np.asarray(unit_cube), param_names, prior_types, prior_ranges,
+            np.asarray(unit_cube),
+            param_names,
+            prior_types,
+            prior_ranges,
         )
-        (physical_params, PT_params, log_X_params, cloud_params,
-         geometry_params, *rest) = split_params(physical, N_params_cum)
+        (
+            physical_params,
+            PT_params,
+            log_X_params,
+            cloud_params,
+            geometry_params,
+            *rest,
+        ) = split_params(physical, N_params_cum)
         # rest contains stellar, offsets, err_inflation, high_res, surface;
         # v0 uses offsets, err_inflation; the rest are no-ops.
         offset_params = rest[1] if len(rest) > 1 else np.array([])
@@ -83,23 +101,33 @@ def make_loglikelihood(planet, star, model, opac, wl, data_properties,
 
         if reference_parameter == "R_p_ref":
             R_p_ref = physical_params[0]
-            P_ref = 10.0 ** log_P_ref_fixed
+            P_ref = 10.0**log_P_ref_fixed
         elif reference_parameter == "P_ref":
             R_p_ref = R_p_ref_fixed
             P_ref = 10.0 ** physical_params[0]
         else:  # 'R_p_ref+P_ref'
             R_p_ref = physical_params[0]
             P_ref = 10.0 ** physical_params[1]
-        atmosphere = make_atmosphere(planet, model, P, P_ref, R_p_ref,
-                                      PT_params, log_X_params,
-                                      cloud_params=cloud_params,
-                                      geometry_params=geometry_params,
-                                      constant_gravity=True)
-        spectrum = compute_spectrum(planet, star, model, atmosphere, opac,
-                                     wl, spectrum_type="transmission")
+        atmosphere = make_atmosphere(
+            planet,
+            model,
+            P,
+            P_ref,
+            R_p_ref,
+            PT_params,
+            log_X_params,
+            cloud_params=cloud_params,
+            geometry_params=geometry_params,
+            constant_gravity=True,
+        )
+        spectrum = compute_spectrum(
+            planet, star, model, atmosphere, opac, wl, spectrum_type="transmission"
+        )
         ymodel = bin_spectrum_to_data(spectrum, wl, data_properties)
         ll = loglikelihood(
-            ymodel, data_properties["ydata"], data_properties["err_data"],
+            ymodel,
+            data_properties["ydata"],
+            data_properties["err_data"],
             offset_params=offset_params,
             err_inflation_params=err_inflation_params,
             offsets_applied=offsets_applied,
@@ -114,6 +142,7 @@ def make_loglikelihood(planet, star, model, opac, wl, data_properties,
             offset_3_end=data_properties["offset_3_end"],
         )
         return ll
+
     return logp
 
 
