@@ -112,9 +112,8 @@ def test_v0_config_accepts_k2_18b_one_offset():
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           aerosol_species=("ZnS",)), "Iceberg/Mie"),
-    (dict(PT_profile="Madhu", X_profile="isochem",
-          cloud_model="MacMad17", cloud_dim=2,
-          gravity_setting="free"), "gravity_setting='fixed'"),
+    # Phase 0.5.2b: gravity_setting='free' / mass_setting='free' are
+    # now supported and no longer raise NotImplementedError.
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           species_vert_gradient=("H2O",)), "gradients"),
@@ -127,9 +126,6 @@ def test_v0_config_accepts_k2_18b_one_offset():
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           reference_parameter="invalid"), "reference_parameter"),
-    (dict(PT_profile="Madhu", X_profile="isochem",
-          cloud_model="MacMad17", cloud_dim=2,
-          mass_setting="free"), "mass_setting='fixed'"),
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           bulk_species=("ghost",)), "ghost"),

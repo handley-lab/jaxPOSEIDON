@@ -83,10 +83,18 @@ def assert_v0_model_config(
             f"reference_parameter={reference_parameter!r} not in v0 "
             f"({sorted(V0_REFERENCE_PARAMETERS)})"
         )
-    if gravity_setting != "fixed":
-        raise NotImplementedError("v0 requires gravity_setting='fixed'")
-    if mass_setting != "fixed":
-        raise NotImplementedError("v0 requires mass_setting='fixed'")
+    # gravity_setting / mass_setting (Phase 0.5.2b): {"fixed", "free"}.
+    # POSEIDON parameters.py:274-275 forbids both free simultaneously.
+    if gravity_setting not in ("fixed", "free"):
+        raise NotImplementedError(
+            f"gravity_setting={gravity_setting!r} not a known POSEIDON option"
+        )
+    if mass_setting not in ("fixed", "free"):
+        raise NotImplementedError(
+            f"mass_setting={mass_setting!r} not a known POSEIDON option"
+        )
+    if gravity_setting == "free" and mass_setting == "free":
+        raise Exception("Error: only one of mass or gravity can be a free parameter.")
     if "ghost" in bulk_species:
         raise NotImplementedError("v0 does not support 'ghost' bulk species")
     if PT_profile not in V0_PT_PROFILES:
@@ -297,6 +305,13 @@ def assign_free_params(
         physical_params += ["log_P_ref"]
     elif reference_parameter == "R_p_ref+P_ref":
         physical_params += ["R_p_ref", "log_P_ref"]
+
+    # Phase 0.5.2b: free gravity/mass append after the reference parameter(s)
+    # in POSEIDON's order (parameters.py:277-281).
+    if gravity_setting == "free":
+        physical_params += ["log_g"]
+    if mass_setting == "free":
+        physical_params += ["M_p"]
 
     N_physical_params = len(physical_params)
     params += physical_params
