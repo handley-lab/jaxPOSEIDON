@@ -89,8 +89,11 @@ def compute_spectrum(
         raise NotImplementedError(
             f"spectrum_type={spectrum_type!r} (only 'transmission' in v0)"
         )
-    if opac["opacity_treatment"] != "opacity_sampling":
-        raise NotImplementedError("opacity_treatment='line_by_line' deferred to v1")
+    if opac["opacity_treatment"] not in ("opacity_sampling", "line_by_line"):
+        raise NotImplementedError(
+            f"opacity_treatment={opac['opacity_treatment']!r} not a known "
+            "POSEIDON option (expected 'opacity_sampling' or 'line_by_line')"
+        )
     if model.get("thermal_scattering") or model.get("reflection"):
         raise NotImplementedError("thermal_scattering / reflection are v1")
     if model.get("surface"):
