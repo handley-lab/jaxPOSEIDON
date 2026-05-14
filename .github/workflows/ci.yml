@@ -71,14 +71,35 @@ jobs:
           # jaxposeidon's pin. --no-deps on POSEIDON avoids it dragging
           # numpy<2 back in.
           # setuptools<81 still bundles pkg_resources, which pysynphot needs.
-          pip install "setuptools<81" spectres mpi4py miepython pysynphot pymultinest h5py pandas matplotlib astropy
+          pip install "setuptools<81" spectres mpi4py miepython pymultinest h5py pandas matplotlib astropy
           pip install --no-deps git+https://github.com/MartianColonist/POSEIDON
-          # Provide a stub for libmultinest.so so pymultinest imports succeed.
-          mkdir -p $RUNNER_TEMP/poseidon_stubs/pymultinest
+          # Stub pysynphot + pymultinest. The real pysynphot uses np.alltrue
+          # (removed in numpy 2.0) at import time; the real pymultinest needs
+          # libmultinest.so. v0 doesn't run either, so stubs are sufficient.
+          mkdir -p $RUNNER_TEMP/poseidon_stubs/pymultinest $RUNNER_TEMP/poseidon_stubs/pysynphot
           cat > $RUNNER_TEMP/poseidon_stubs/pymultinest/__init__.py <<'EOF'
           def run(*a, **kw): raise RuntimeError("stub")
           class Analyzer:
               def __init__(self, *a, **kw): pass
+          EOF
+          cat > $RUNNER_TEMP/poseidon_stubs/pysynphot/__init__.py <<'EOF'
+          class Icat:
+              def __init__(self, *a, **kw): pass
+          class ObsBandpass:
+              def __init__(self, *a, **kw): pass
+          class GaussianSource:
+              def __init__(self, *a, **kw): pass
+          class BlackBody:
+              def __init__(self, *a, **kw): pass
+          class FileSpectrum:
+              def __init__(self, *a, **kw): pass
+          class ArraySpectrum:
+              def __init__(self, *a, **kw): pass
+          class Observation:
+              def __init__(self, *a, **kw): pass
+          class Box:
+              def __init__(self, *a, **kw): pass
+          units = type('m', (), {'Units': lambda *a, **k: None})
           EOF
           echo "PYTHONPATH=$RUNNER_TEMP/poseidon_stubs:$PYTHONPATH" >> $GITHUB_ENV
 
