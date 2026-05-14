@@ -163,14 +163,10 @@ def assert_v0_model_config(
         )
     if error_inflation not in V0_ERROR_INFLATIONS:
         raise NotImplementedError(f"error_inflation={error_inflation!r} not in v0")
-    if surface:
-        raise NotImplementedError("Surfaces are deferred to v1")
     if surface_model not in ("gray", "constant", "lab_data"):
         raise NotImplementedError(
             f"surface_model={surface_model!r} not a known POSEIDON option"
         )
-    if surface_model != "gray":
-        raise NotImplementedError("v0 supports only surface_model='gray'")
     if high_res_method is not None:
         raise NotImplementedError("High-resolution mode is deferred to v1")
     if opaque_Iceberg or list(aerosol_species):
@@ -464,8 +460,18 @@ def assign_free_params(
     # High-resolution (always empty in v0)
     N_high_res_params = 0
 
-    # Surface (parameters.py:1101-1124, gray surface_model only)
-    # surface=False in v0 ⇒ surface_params stays []
+    # Surface (parameters.py:1101-1124)
+    if not disable_atmosphere:
+        if surface:
+            surface_params += ["log_P_surf"]
+        if surface_model == "constant":
+            surface_params += ["albedo_surf"]
+        elif surface_model == "lab_data" and len(surface_components) > 1:
+            for n in range(len(surface_components)):
+                if surface_percentage_option == "linear":
+                    surface_params += [f"{surface_components[n]}_percentage"]
+                elif surface_percentage_option == "log":
+                    surface_params += [f"log_{surface_components[n]}_percentage"]
     N_surface_params = len(surface_params)
     params += surface_params
 

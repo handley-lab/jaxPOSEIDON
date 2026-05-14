@@ -1,17 +1,14 @@
-"""Instrument convolution + binning — v0 port.
+"""Instrument convolution + binning.
 
 Mirrors `POSEIDON/POSEIDON/instrument.py:321-396` (`make_model_data`)
 and the multi-dataset wrapper at `:399-447` (`bin_spectrum_to_data`).
 
-v0 envelope: spectroscopic instruments only (photometric branch
-deferred to Phase 0.5.5). The user prepares
-`(sigma, sensitivity, bin_left, bin_cent, bin_right, norm)` via
-`jaxposeidon._instrument_setup.compute_instrument_indices(...)` and
-passes them to `make_model_data` here.
-
-Setup-only `compute_instrument_indices` lives in
-`jaxposeidon._instrument_setup` (extracted Phase 0.5.2a) so this
-module can be JAX-pure under the v1 source-grep gate.
+Supports both spectroscopic and photometric instruments. Spectroscopic
+data require `(sigma, sensitivity, bin_left, bin_cent, bin_right, norm)`
+arrays; photometric data (IRAC1/IRAC2) skip the PSF convolution and use
+a sensitivity-weighted integral over the band. Per-bin metadata is
+prepared via `_instrument_setup.compute_instrument_indices(...)` /
+`compute_photometric_indices(...)`.
 """
 
 import numpy as np
@@ -22,11 +19,10 @@ try:
 except ImportError:
     from numpy import trapz
 
-# Back-compat re-export: existing v0 tests and external callers import
-# compute_instrument_indices from jaxposeidon._instruments. Keeping the
-# name here as a re-export avoids breaking the v0 1,435-test gate while
-# the actual implementation lives in the setup-only module.
-from jaxposeidon._instrument_setup import compute_instrument_indices  # noqa: F401
+from jaxposeidon._instrument_setup import (
+    PHOTOMETRIC_INSTRUMENTS,
+    compute_instrument_indices,  # noqa: F401
+)
 
 
 def make_model_data(
@@ -46,7 +42,12 @@ def make_model_data(
     Bit-exact port of POSEIDON `instrument.py:321-396`.
     """
     if photometric:
-        raise NotImplementedError("Photometric instruments deferred to v1")
+        integrand = (
+            spectrum[bin_left[0] : bin_right[0]]
+            * sensitivity[bin_left[0] : bin_right[0]]
+        )
+        data = trapz(integrand, wl[bin_left[0] : bin_right[0]])
+        return np.atleast_1d(data / norm)
 
     N_bins = len(bin_cent)
     data = np.zeros(N_bins)
@@ -87,11 +88,7 @@ def bin_spectrum_to_data(spectrum, wl, data_properties):
     ymodel = np.array([])
     N_wl = len(wl)
     for i in range(len(data_properties["datasets"])):
-        if data_properties["instruments"][i] in ("IRAC1", "IRAC2"):
-            raise NotImplementedError(
-                f"Photometric instrument {data_properties['instruments'][i]} "
-                "deferred to v1"
-            )
+        instrument = data_properties["instruments"][i]
         idx_1 = data_properties["len_data_idx"][i]
         idx_2 = data_properties["len_data_idx"][i + 1]
         ymodel_i = make_model_data(
@@ -103,7 +100,7 @@ def bin_spectrum_to_data(spectrum, wl, data_properties):
             data_properties["bin_cent"][idx_1:idx_2],
             data_properties["bin_right"][idx_1:idx_2],
             data_properties["norm"][idx_1:idx_2],
-            photometric=False,
+            photometric=(instrument in PHOTOMETRIC_INSTRUMENTS),
         )
         ymodel = np.concatenate([ymodel, ymodel_i])
     return ymodel

@@ -92,8 +92,9 @@ def test_prior_transform_does_not_mutate_input():
     np.testing.assert_array_equal(cube, np.array([0.3, 0.7]))
 
 
-def test_prior_transform_rejects_CLR():
-    with pytest.raises(NotImplementedError, match="CLR"):
+def test_prior_transform_CLR_requires_kwargs():
+    """CLR prior requires X_param_names + N_params_cum to locate chemistry slice."""
+    with pytest.raises(ValueError, match="CLR"):
         prior_transform(
             np.array([0.5]), ["log_X"], {"log_X": "CLR"}, {"log_X": [-12.0, -1.0]}
         )
