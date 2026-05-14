@@ -60,6 +60,7 @@ def extinction(
     n_aerosol_array,
     sigma_Mie_array,
     P_deep=1000.0,
+    disable_continuum=False,
 ):
     """Compute kappa_gas, kappa_Ray, kappa_cloud arrays.
 
@@ -109,11 +110,12 @@ def extinction(
                     np.log10(P[i]), log_P_fine[0], log_P_fine[-1], N_P_fine
                 )
 
-                for q in range(N_cia_pairs):
-                    n_cia_1 = n_level * X_cia[0, q, i, j, k]
-                    n_cia_2 = n_level * X_cia[1, q, i, j, k]
-                    n_n_cia = n_cia_1 * n_cia_2
-                    kappa_gas[i, j, k, :] += n_n_cia * cia_stored[q, idx_T_fine, :]
+                if not disable_continuum:
+                    for q in range(N_cia_pairs):
+                        n_cia_1 = n_level * X_cia[0, q, i, j, k]
+                        n_cia_2 = n_level * X_cia[1, q, i, j, k]
+                        n_n_cia = n_cia_1 * n_cia_2
+                        kappa_gas[i, j, k, :] += n_n_cia * cia_stored[q, idx_T_fine, :]
 
                 # H-minus free-free (POSEIDON absorption.py:1127-1137).
                 for q in range(N_ff_pairs):
@@ -133,9 +135,10 @@ def extinction(
                         n_q * sigma_stored[q, idx_P_fine, idx_T_fine, :]
                     )
 
-                for q in range(N_species):
-                    n_q = n_level * X[q, i, j, k]
-                    kappa_Ray[i, j, k, :] += n_q * Rayleigh_stored[q, :]
+                if not disable_continuum:
+                    for q in range(N_species):
+                        n_q = n_level * X[q, i, j, k]
+                        kappa_Ray[i, j, k, :] += n_q * Rayleigh_stored[q, :]
 
             if enable_haze == 1:
                 for i in range(i_bot, N_layers):

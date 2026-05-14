@@ -54,5 +54,3 @@ def test_emission_bare_surface_matches_poseidon():
         atol=0,
         rtol=1e-13,
     )
-
-

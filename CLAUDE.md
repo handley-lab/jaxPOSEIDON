@@ -43,7 +43,7 @@ This is scientific code, not a web service.
   `_parameter_setup.py`, `_surface_setup.py`,
   `_stellar_grid_loader.py`, `_fastchem_grid_loader.py`,
   `_aerosol_db_loader.py`, `_eddysed_input_loader.py`,
-  `_lbl_table_loader.py`) where they mirror POSEIDON's
+  `_lbl_table_loader.py`, `_output.py`) where they mirror POSEIDON's
   `reference_data/` dispatch **or** POSEIDON's setup-time
   model/parameter dispatch (e.g. `assign_free_params` parameter-name
   lookups). They must be plain constants — frozen dicts/tuples — and
@@ -94,7 +94,8 @@ This is scientific code, not a web service.
 - `_loaddata.py`, `_instrument_setup.py`, `_parameter_setup.py`,
   `_surface_setup.py`, `_stellar_grid_loader.py`,
   `_fastchem_grid_loader.py`, `_aerosol_db_loader.py`,
-  `_eddysed_input_loader.py`, `_lbl_table_loader.py` —
+  `_eddysed_input_loader.py`, `_lbl_table_loader.py`,
+  `_output.py` —
   **setup-only modules**: numpy / scipy / h5py / pysynphot / PyMSG /
   file I/O permitted; never called from inside `jit`; allow-listed by
   the v1 source-grep gate.
