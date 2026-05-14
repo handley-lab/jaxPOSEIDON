@@ -48,7 +48,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        # POSEIDON pins python<3.13, so 3.13 cannot install the oracle.
+        # When POSEIDON drops that pin, add 3.13 back here.
+        python-version: ["3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
@@ -68,7 +70,7 @@ jobs:
           # POSEIDON's own deps; install separately to keep numpy>=2 from
           # jaxposeidon's pin. --no-deps on POSEIDON avoids it dragging
           # numpy<2 back in.
-          pip install spectres mpi4py miepython pysynphot pymultinest h5py
+          pip install spectres mpi4py miepython pysynphot pymultinest h5py pandas matplotlib astropy
           pip install --no-deps git+https://github.com/MartianColonist/POSEIDON
           # Provide a stub for libmultinest.so so pymultinest imports succeed.
           mkdir -p $RUNNER_TEMP/poseidon_stubs/pymultinest
