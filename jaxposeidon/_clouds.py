@@ -112,7 +112,9 @@ def interpolate_sigma_Mie_grid(
     r_m_grid = aerosol_grid["r_m_grid"]
     wl_grid = aerosol_grid["wl_grid"]
 
-    aerosol_species = np.array(aerosol_species)
+    aerosol_species_str = isinstance(aerosol_species, str)
+    if not aerosol_species_str:
+        aerosol_species = np.array(aerosol_species)
     np.seterr(divide="ignore")
 
     def not_valid(params, grid):
@@ -128,23 +130,30 @@ def interpolate_sigma_Mie_grid(
         )
 
     def interpolate(species):
-        q = np.where(aerosol_species == species)[0][0]
+        if aerosol_species_str:
+            if species != aerosol_species:
+                raise KeyError(species)
+            q = 0
+            r_m_lookup = r_m_array if np.ndim(r_m_array) == 0 else r_m_array[0]
+        else:
+            q = np.where(aerosol_species == species)[0][0]
+            r_m_lookup = r_m_array[q]
         grid_interp = RegularGridInterpolator(
             ([0, 1, 2], r_m_grid, wl_grid), sigma_Mie_grid[q, :, :, :]
         )
         return [
-            grid_interp((0, r_m_array[q], wl)),
-            grid_interp((1, r_m_array[q], wl)),
-            grid_interp((2, r_m_array[q], wl)),
+            grid_interp((0, r_m_lookup, wl)),
+            grid_interp((1, r_m_lookup, wl)),
+            grid_interp((2, r_m_lookup, wl)),
         ]
 
     if not return_dict:
-        if isinstance(aerosol_species, str):
+        if aerosol_species_str:
             return interpolate(aerosol_species)
         return np.array([interpolate(species) for species in aerosol_species])
 
     sigma_Mie_interp_dict = {}
-    if isinstance(aerosol_species, str):
+    if aerosol_species_str:
         sigma_Mie_interp_dict[aerosol_species] = interpolate(aerosol_species)
         return sigma_Mie_interp_dict
     for species in aerosol_species:

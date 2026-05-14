@@ -20,9 +20,10 @@ import os
 import h5py
 import numpy as np
 
-SUPPORTED_AEROSOL_GRIDS = frozenset(
-    {"aerosol", "SiO2_free_logwidth", "aerosol_directional", "aerosol_diamonds"}
-)
+# POSEIDON's full supported list also includes 'SiO2_free_logwidth',
+# 'aerosol_directional', 'aerosol_diamonds'; this port currently
+# implements only the default 'aerosol' grid with fixed log_r_m_std_dev=0.5.
+SUPPORTED_AEROSOL_GRIDS = frozenset({"aerosol"})
 
 
 def load_aerosol_grid(aerosol_species, grid="aerosol"):

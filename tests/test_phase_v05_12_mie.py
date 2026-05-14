@@ -48,6 +48,33 @@ def test_load_aerosol_grid_synthetic_fixture(tmp_path, monkeypatch):
     assert grid["sigma_Mie_grid"].shape == (2, 3, 6, 20)
 
 
+def test_load_aerosol_grid_matches_poseidon(tmp_path, monkeypatch):
+    """POSEIDON's load_aerosol_grid expects a trailing slash on
+    POSEIDON_input_data (it does string concat `input_file_path + 'opacity/'`).
+    The port uses os.path.join, so set the env var with explicit trailing
+    separator to make POSEIDON happy."""
+    from POSEIDON.clouds import load_aerosol_grid as p_load
+
+    _synthetic_aerosol_db(tmp_path)
+    monkeypatch.setenv("POSEIDON_input_data", str(tmp_path) + os.sep)
+    ours = _aerosol_db_loader.load_aerosol_grid(["H2O", "ZnS"])
+    theirs = p_load(["H2O", "ZnS"])
+    assert ours["grid"] == theirs["grid"]
+    np.testing.assert_array_equal(ours["wl_grid"], theirs["wl_grid"])
+    np.testing.assert_array_equal(ours["r_m_grid"], theirs["r_m_grid"])
+    np.testing.assert_array_equal(
+        ours["sigma_Mie_grid"], np.asarray(theirs["sigma_Mie_grid"])
+    )
+
+
+def test_load_aerosol_grid_rejects_deferred_grids():
+    """Non-default grids (SiO2_free_logwidth / aerosol_directional /
+    aerosol_diamonds) are POSEIDON-supported but not yet implemented here."""
+    for grid in ("SiO2_free_logwidth", "aerosol_directional", "aerosol_diamonds"):
+        with pytest.raises(Exception, match="unsupported aerosol grid"):
+            _aerosol_db_loader.load_aerosol_grid(["H2O"], grid=grid)
+
+
 def test_load_aerosol_grid_rejects_unknown_grid():
     with pytest.raises(Exception, match="unsupported aerosol grid"):
         _aerosol_db_loader.load_aerosol_grid(["H2O"], grid="unknown")
@@ -120,6 +147,30 @@ def test_interpolate_sigma_Mie_grid_return_dict_matches_poseidon():
             np.testing.assert_allclose(
                 ours[sp][key], theirs[sp][key], atol=0, rtol=1e-13
             )
+
+
+def test_interpolate_sigma_Mie_grid_single_string_species_array_equivalence():
+    """Single string `aerosol_species` argument equivalence vs single-element
+    array (POSEIDON's path crashes on string + np.array conversion)."""
+    grid = _build_grid_dict()
+    wl = np.linspace(1.0, 5.0, 30)
+    r_m_array = np.array([0.1])
+    out_string = _clouds.interpolate_sigma_Mie_grid(
+        grid,
+        wl,
+        r_m_array,
+        "H2O",
+        return_dict=False,
+    )
+    out_array = _clouds.interpolate_sigma_Mie_grid(
+        grid,
+        wl,
+        r_m_array,
+        np.array(["H2O"]),
+        return_dict=False,
+    )
+    # Both paths should return identical eff_ext/eff_g/eff_w stacks
+    np.testing.assert_array_equal(np.asarray(out_string), out_array[0])
 
 
 def test_interpolate_sigma_Mie_grid_rejects_out_of_bounds():

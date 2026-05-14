@@ -5,6 +5,16 @@ POSEIDON reference outputs.
 
 ## Open numerical mismatches
 
+### Phase 0.5.12 Mie single-string `aerosol_species`
+
+Same root cause as the FastChem single-string divergence below.
+POSEIDON `clouds.py:1711` does
+`np.where(aerosol_species == species)[0][0]` after `aerosol_species =
+np.array(aerosol_species)` at line 1681; for a single Python string,
+this gives a 0-d array and `np.where(...)[0]` raises on numpy >= 2.x.
+The port handles the string case explicitly (q=0). Real callers always
+pass an iterable; documentation-only divergence.
+
 ### Phase 0.5.8 FastChem single-string `chemical_species`
 
 **POSEIDON path crashes in modern numpy.** POSEIDON `chemistry.py:244`
