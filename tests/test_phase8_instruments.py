@@ -50,19 +50,36 @@ def test_make_model_data_matches_poseidon():
     np.testing.assert_allclose(ours, theirs, atol=0, rtol=0)
 
 
-def test_make_model_data_rejects_photometric():
-    with pytest.raises(NotImplementedError, match="Photometric"):
-        _instruments.make_model_data(
-            np.zeros(10),
-            np.linspace(0, 1, 10),
-            np.zeros(1),
-            np.ones(10),
-            np.array([0]),
-            np.array([1]),
-            np.array([2]),
-            np.array([1.0]),
-            photometric=True,
-        )
+def test_make_model_data_photometric_band_integral():
+    """Photometric path: sensitivity-weighted band integral (no PSF convolution)."""
+    N = 200
+    wl = np.linspace(3.0, 5.0, N)  # μm — IRAC1-like band
+    spectrum = 0.01 + 0.001 * np.sin(wl)
+    sensitivity = np.zeros(N)
+    sensitivity[50:150] = 1.0  # boxcar
+    bin_left = np.array([50])
+    bin_cent = np.array([100])
+    bin_right = np.array([150])
+    try:
+        from numpy import trapezoid as trapz
+    except ImportError:
+        from numpy import trapz
+    expected_norm = trapz(sensitivity[50:150], wl[50:150])
+    expected_data = trapz(spectrum[50:150] * sensitivity[50:150], wl[50:150])
+    result = _instruments.make_model_data(
+        spectrum,
+        wl,
+        np.zeros(1),
+        sensitivity,
+        bin_left,
+        bin_cent,
+        bin_right,
+        np.array([expected_norm]),
+        photometric=True,
+    )
+    np.testing.assert_allclose(
+        result, np.array([expected_data / expected_norm]), atol=0, rtol=1e-13
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -218,22 +235,31 @@ def test_bin_spectrum_to_data_matches_poseidon():
     np.testing.assert_allclose(ours, theirs, atol=0, rtol=0)
 
 
-def test_bin_spectrum_to_data_rejects_photometric():
-    wl = np.linspace(1.0, 5.0, 100)
-    spectrum = np.zeros(100)
+def test_bin_spectrum_to_data_photometric_single_band():
+    """IRAC1 dataset routes through the photometric branch (no PSF conv)."""
+    wl = np.linspace(3.0, 5.0, 200)
+    spectrum = 0.01 + 0.001 * np.sin(wl)
+    sens = np.zeros(200)
+    sens[50:150] = 1.0
+    try:
+        from numpy import trapezoid as trapz
+    except ImportError:
+        from numpy import trapz
+    norm = trapz(sens[50:150], wl[50:150])
     data_properties = {
         "datasets": ["IRAC1"],
         "instruments": ["IRAC1"],
         "psf_sigma": np.zeros(1),
-        "sens": np.zeros(100),
-        "bin_left": np.array([0]),
-        "bin_cent": np.array([50]),
-        "bin_right": np.array([99]),
-        "norm": np.array([1.0]),
+        "sens": sens,
+        "bin_left": np.array([50]),
+        "bin_cent": np.array([100]),
+        "bin_right": np.array([150]),
+        "norm": np.array([norm]),
         "len_data_idx": np.array([0, 1]),
     }
-    with pytest.raises(NotImplementedError, match="IRAC1"):
-        _instruments.bin_spectrum_to_data(spectrum, wl, data_properties)
+    result = _instruments.bin_spectrum_to_data(spectrum, wl, data_properties)
+    expected = trapz(spectrum[50:150] * sens[50:150], wl[50:150]) / norm
+    np.testing.assert_allclose(result, np.array([expected]), atol=0, rtol=1e-13)
 
 
 # ---------------------------------------------------------------------------

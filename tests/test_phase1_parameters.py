@@ -153,16 +153,8 @@ def test_v0_config_accepts_k2_18b_one_offset():
             ),
             "Stellar",
         ),
-        (
-            dict(
-                PT_profile="Madhu",
-                X_profile="isochem",
-                cloud_model="MacMad17",
-                cloud_dim=2,
-                surface=True,
-            ),
-            "Surface",
-        ),
+        # Phase 0.5.3: surface=True is now supported (parameter parsing only;
+        # spectrum effect lands in Phase 0.5.13d).
         (
             dict(
                 PT_profile="Madhu",
@@ -306,16 +298,8 @@ def test_v0_config_accepts_k2_18b_one_offset():
             ),
             "lognormal_logwidth_free",
         ),
-        (
-            dict(
-                PT_profile="Madhu",
-                X_profile="isochem",
-                cloud_model="MacMad17",
-                cloud_dim=2,
-                surface_model="constant",
-            ),
-            "surface_model='gray'",
-        ),
+        # Phase 0.5.3: surface_model='constant' / 'lab_data' now supported
+        # (parameter parsing only).
         (
             dict(
                 PT_profile="isotherm",
