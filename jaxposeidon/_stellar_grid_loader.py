@@ -21,13 +21,7 @@ def load_stellar_pysynphot(wl_out, T_eff, Met, log_g, stellar_grid="cbk04"):
     Bit-equivalent port of POSEIDON `stellar.py:63-107`. Requires
     `$PYSYN_CDBS` to point at a pysynphot grid root.
     """
-    try:
-        import pysynphot as psyn
-    except ImportError as exc:
-        raise Exception(
-            "pysynphot is required for load_stellar_pysynphot. "
-            "Install pysynphot and set $PYSYN_CDBS."
-        ) from exc
+    import pysynphot as psyn
 
     if stellar_grid == "cbk04":
         sp = psyn.Icat("ck04models", T_eff, Met, log_g)
@@ -48,20 +42,11 @@ def load_stellar_pysynphot(wl_out, T_eff, Met, log_g, stellar_grid="cbk04"):
 
 def open_pymsg_grid(stellar_grid):
     """Open a PyMSG SpecGrid (bit-equivalent to POSEIDON `stellar.py:110-150`)."""
-    try:
-        import pymsg
-    except ImportError as exc:
-        raise Exception(
-            "PyMSG is required for open_pymsg_grid. Install PyMSG and set $MSG_DIR."
-        ) from exc
     import os
 
-    msg_dir = os.environ.get("MSG_DIR")
-    if msg_dir is None:
-        raise Exception(
-            "PyMSG cannot locate $MSG_DIR. Set the env var to point at the "
-            "PyMSG grids directory."
-        )
+    import pymsg
+
+    msg_dir = os.environ["MSG_DIR"]
     grid_path = os.path.join(msg_dir, "grids", f"{stellar_grid}.h5")
     return pymsg.SpecGrid(grid_path)
 

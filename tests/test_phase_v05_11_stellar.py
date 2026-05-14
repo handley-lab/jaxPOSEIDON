@@ -13,6 +13,8 @@ grids are env-gated and not available in CI). Synthetic spectra are
 used downstream of the loader.
 """
 
+import os
+
 import numpy as np
 import pytest
 
@@ -172,6 +174,50 @@ def test_assign_free_params_stellar_block_matches_poseidon(stellar_contam, expec
     assert list(ours[6]) == expected
     np.testing.assert_array_equal(ours[0], theirs[0])
     np.testing.assert_array_equal(ours[-1], theirs[-1])
+
+
+# ---------------------------------------------------------------------------
+# Env-gated parity tests against the real pysynphot / PyMSG grids.
+# ---------------------------------------------------------------------------
+@pytest.mark.skipif(
+    os.environ.get("PYSYN_CDBS") is None,
+    reason="pysynphot grids unavailable; set $PYSYN_CDBS to enable.",
+)
+def test_load_stellar_pysynphot_matches_poseidon():
+    from jaxposeidon._stellar_grid_loader import load_stellar_pysynphot
+    from POSEIDON.stellar import load_stellar_pysynphot as p_load
+    wl = np.linspace(0.5, 5.0, 200)
+    np.testing.assert_allclose(
+        load_stellar_pysynphot(wl, 5800.0, 0.0, 4.4),
+        p_load(wl, 5800.0, 0.0, 4.4),
+        atol=0,
+        rtol=1e-13,
+    )
+
+
+@pytest.mark.skipif(
+    os.environ.get("MSG_DIR") is None,
+    reason="PyMSG grids unavailable; set $MSG_DIR to enable.",
+)
+def test_load_stellar_pymsg_matches_poseidon():
+    from jaxposeidon._stellar_grid_loader import (
+        load_stellar_pymsg,
+        open_pymsg_grid,
+    )
+    from POSEIDON.stellar import (
+        load_stellar_pymsg as p_load,
+        open_pymsg_grid as p_open,
+    )
+    wl = np.linspace(0.5, 5.0, 200)
+    grid_name = "Goettingen-HiRes"
+    sg_ours = open_pymsg_grid(grid_name)
+    sg_theirs = p_open(grid_name)
+    np.testing.assert_allclose(
+        load_stellar_pymsg(wl, sg_ours, 5800.0, 0.0, 4.4, grid_name),
+        p_load(wl, sg_theirs, 5800.0, 0.0, 4.4, grid_name),
+        atol=0,
+        rtol=1e-13,
+    )
 
 
 def test_assign_free_params_rejects_unknown_stellar_contam():
