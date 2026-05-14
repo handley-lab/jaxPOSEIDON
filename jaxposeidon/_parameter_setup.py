@@ -122,8 +122,7 @@ def assert_v0_model_config(
         raise Exception("Error: only one of mass or gravity can be a free parameter.")
     if PT_profile not in V05_PT_PROFILES_1D:
         raise NotImplementedError(
-            f"PT_profile={PT_profile!r} not in v0.5 set "
-            f"({sorted(V05_PT_PROFILES_1D)})"
+            f"PT_profile={PT_profile!r} not in v0.5 set ({sorted(V05_PT_PROFILES_1D)})"
         )
     if X_profile not in V05_X_PROFILES:
         raise NotImplementedError(
@@ -147,11 +146,13 @@ def assert_v0_model_config(
             "POSEIDON; v0 requires the inert default cloud_type='deck' so "
             "the accepted API surface matches the documented envelope."
         )
-    if PT_dim != 1 or X_dim != 1:
-        raise NotImplementedError("v0 supports only PT_dim=1, X_dim=1")
-    if Atmosphere_dimension != 1:
+    if PT_dim not in (1, 2, 3):
+        raise NotImplementedError(f"PT_dim={PT_dim} not in {{1, 2, 3}}")
+    if X_dim not in (1, 2, 3):
+        raise NotImplementedError(f"X_dim={X_dim} not in {{1, 2, 3}}")
+    if Atmosphere_dimension not in (1, 2, 3):
         raise NotImplementedError(
-            f"Atmosphere_dimension={Atmosphere_dimension} != 1; v0 is 1D only"
+            f"Atmosphere_dimension={Atmosphere_dimension} not in {{1, 2, 3}}"
         )
     if stellar_contam is not None:
         raise NotImplementedError("Stellar contamination is deferred to v1")
@@ -179,16 +180,9 @@ def assert_v0_model_config(
             "species_EM_gradient / species_DN_gradient require 2D/3D "
             "atmosphere — deferred to Phase 0.5.9"
         )
-    if TwoD_type is not None:
-        raise NotImplementedError("v0 forbids TwoD_type")
-    # Atmosphere_dimension=1 ⇒ POSEIDON does not insert geometry params
-    # regardless of sharp_*_transition values. Still, the v0 envelope is
-    # explicitly 1D-only, so we reject non-default sharp-transition flags
-    # to avoid silently accepting a 2D/3D-only tuning knob.
-    if sharp_DN_transition or sharp_EM_transition:
+    if TwoD_type is not None and TwoD_type not in ("D-N", "E-M"):
         raise NotImplementedError(
-            "sharp_DN_transition / sharp_EM_transition only apply to 2D/3D "
-            "atmospheres, which are deferred to v1."
+            f"TwoD_type={TwoD_type!r} not a known POSEIDON option"
         )
     # PT_penalty is only meaningful with PT_profile='Pelletier'; only the
     # additional sigma_s parameter is appended at this layer. The
@@ -421,8 +415,22 @@ def assign_free_params(
     N_cloud_params = len(cloud_params)
     params += cloud_params
 
-    # Geometry parameters (parameters.py:995-1009, Atmosphere_dimension=1 ⇒ empty)
-    N_geometry_params = 0  # 1D atmosphere: no alpha/beta
+    # Geometry parameters (parameters.py:995-1009)
+    if Atmosphere_dimension == 3:
+        if not sharp_DN_transition:
+            if not sharp_EM_transition:
+                geometry_params += ["alpha", "beta"]
+            else:
+                geometry_params += ["beta"]
+        elif not sharp_EM_transition:
+            geometry_params += ["alpha"]
+    elif Atmosphere_dimension == 2:
+        if TwoD_type == "E-M" and not sharp_EM_transition:
+            geometry_params += ["alpha"]
+        elif TwoD_type == "D-N" and not sharp_DN_transition:
+            geometry_params += ["beta"]
+    N_geometry_params = len(geometry_params)
+    params += geometry_params
 
     # Stellar parameters (parameters.py:1016-1031): always empty in v0
     N_stellar_params = 0

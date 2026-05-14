@@ -16,11 +16,23 @@ def test_atmosphere_regions_1D_matches_poseidon():
     assert (n_s, n_z) == (p_n_s, p_n_z) == (1, 1)
 
 
-def test_atmosphere_regions_rejects_higher_dim():
-    with pytest.raises(NotImplementedError, match="Atmosphere_dimension=1"):
-        _geometry.atmosphere_regions(2, "D-N", 2, 2)
-    with pytest.raises(NotImplementedError):
-        _geometry.atmosphere_regions(3)
+@pytest.mark.parametrize("ad,td,nem,ndn,expected", [
+    (1, None, 2, 2, (1, 1)),
+    (2, "E-M", 2, 2, (4, 1)),
+    (2, "D-N", 2, 2, (1, 4)),
+    (3, None, 2, 2, (4, 4)),
+    (3, None, 4, 2, (6, 4)),
+])
+def test_atmosphere_regions_matches_poseidon(ad, td, nem, ndn, expected):
+    from POSEIDON.geometry import atmosphere_regions as p_regions
+    n_s, n_z = _geometry.atmosphere_regions(ad, td, nem, ndn)
+    p_n_s, p_n_z = p_regions(ad, td, nem, ndn)
+    assert (n_s, n_z) == (p_n_s, p_n_z) == expected
+
+
+def test_atmosphere_regions_rejects_tesseract():
+    with pytest.raises(Exception, match="tesseract"):
+        _geometry.atmosphere_regions(4)
 
 
 def test_angular_grids_1D_matches_poseidon():
@@ -32,9 +44,22 @@ def test_angular_grids_1D_matches_poseidon():
         np.testing.assert_array_equal(a, b)
 
 
-def test_angular_grids_rejects_higher_dim():
-    with pytest.raises(NotImplementedError):
-        _geometry.angular_grids(2, "D-N", 2, 2, 0.0, 30.0, False, False)
+@pytest.mark.parametrize("ad,td,nem,ndn,alpha,beta,sdn,sem", [
+    (2, "E-M", 2, 2, 30.0, 0.0, False, False),
+    (2, "D-N", 2, 2, 0.0, 30.0, False, False),
+    (2, "E-M", 2, 2, 0.0, 0.0, False, True),
+    (2, "D-N", 2, 2, 0.0, 0.0, True, False),
+    (3, None, 2, 2, 30.0, 30.0, False, False),
+    (3, None, 4, 4, 30.0, 30.0, False, False),
+    (3, None, 2, 2, 0.0, 0.0, True, True),
+])
+def test_angular_grids_2D_3D_matches_poseidon(ad, td, nem, ndn, alpha, beta, sdn, sem):
+    from POSEIDON.geometry import angular_grids as p_angular
+    ours = _geometry.angular_grids(ad, td, nem, ndn, alpha, beta, sdn, sem)
+    theirs = p_angular(ad, td, nem, ndn, alpha, beta, sdn, sem)
+    assert len(ours) == len(theirs) == 6
+    for a, b in zip(ours, theirs, strict=True):
+        np.testing.assert_array_equal(a, b)
 
 
 # ---------------------------------------------------------------------------

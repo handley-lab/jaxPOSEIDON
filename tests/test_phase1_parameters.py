@@ -100,7 +100,7 @@ def test_v0_config_accepts_k2_18b_one_offset():
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=3), "cloud_dim"),
     (dict(PT_profile="Madhu", X_profile="isochem",
-          cloud_model="MacMad17", cloud_dim=2, PT_dim=2), "PT_dim=1"),
+          cloud_model="MacMad17", cloud_dim=2, PT_dim=4), "PT_dim"),
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           stellar_contam="one_spot"), "Stellar"),
@@ -125,7 +125,7 @@ def test_v0_config_accepts_k2_18b_one_offset():
           reference_parameter="invalid"), "reference_parameter"),
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
-          X_dim=2), "PT_dim=1, X_dim=1"),
+          X_dim=4), "X_dim"),
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
           cloud_type="shiny_deck"), "cloud_type"),
@@ -140,16 +140,10 @@ def test_v0_config_accepts_k2_18b_one_offset():
           opaque_Iceberg=True), "Iceberg/Mie"),
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
-          TwoD_type="D-N"), "TwoD_type"),
+          TwoD_type="bogus"), "TwoD_type"),
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
-          Atmosphere_dimension=2), "Atmosphere_dimension"),
-    (dict(PT_profile="Madhu", X_profile="isochem",
-          cloud_model="MacMad17", cloud_dim=2,
-          sharp_DN_transition=True), "sharp_DN_transition"),
-    (dict(PT_profile="Madhu", X_profile="isochem",
-          cloud_model="MacMad17", cloud_dim=2,
-          sharp_EM_transition=True), "sharp"),
+          Atmosphere_dimension=4), "Atmosphere_dimension"),
     # PT_penalty with non-Pelletier profile is still rejected.
     (dict(PT_profile="Madhu", X_profile="isochem",
           cloud_model="MacMad17", cloud_dim=2,
@@ -183,10 +177,9 @@ def test_unsupported_kwargs_raise_NotImplementedError_not_TypeError():
         cloud_model="cloud-free",
         cloud_dim=1,
     )
-    # Each of these activates a deferred POSEIDON branch and must NOT TypeError.
-    for kw in [{"sharp_DN_transition": True}, {"sharp_EM_transition": True},
-               {"PT_penalty": True}, {"lognormal_logwidth_free": True},
-               {"Atmosphere_dimension": 2}, {"opaque_Iceberg": True}]:
+    # Each of these activates a not-yet-ported POSEIDON branch and must NOT TypeError.
+    for kw in [{"PT_penalty": True}, {"lognormal_logwidth_free": True},
+               {"opaque_Iceberg": True}]:
         with pytest.raises(NotImplementedError):
             assign_free_params(**base, **kw)
 
