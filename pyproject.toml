@@ -37,7 +37,7 @@ test = [
 # and set POSEIDON_input_data to the opacity-database directory.
 
 [project.urls]
-Source = "https://github.com/handley-lab/jaxposeidon"
+Source = "https://github.com/handley-lab/jaxPOSEIDON"
 "POSEIDON (oracle)" = "https://github.com/MartianColonist/POSEIDON"
 
 [tool.setuptools.packages.find]
