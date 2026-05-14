@@ -95,15 +95,6 @@ def test_extinction_rejects_Mie():
         extinction(**cfg)
 
 
-def test_extinction_rejects_ff():
-    cfg = _set_up_extinction()
-    cfg["ff_pairs"] = np.array(["H-ff"])
-    with pytest.raises(NotImplementedError, match="H-minus"):
-        extinction(**cfg)
-
-
-def test_extinction_rejects_bf():
-    cfg = _set_up_extinction()
-    cfg["bf_species"] = np.array(["H-bf"])
-    with pytest.raises(NotImplementedError, match="H-minus"):
-        extinction(**cfg)
+# Phase 0.5.4: H-minus ff/bf are now ported (see _h_minus.py +
+# tests/test_phase_v05_4_h_minus.py); the v0 rejection tests for
+# `ff_pairs` / `bf_species` non-empty are obsolete.

@@ -64,19 +64,24 @@ def extinction(
     """Compute kappa_gas, kappa_Ray, kappa_cloud arrays.
 
     Bit-exact port of POSEIDON `absorption.py:1034-1227` for the v0
-    envelope (no surface, no Mie). Surface, Mie, and ff/bf-active
-    configurations raise NotImplementedError.
+    envelope (no surface, no Mie). Surface and Mie configurations
+    raise NotImplementedError. H-minus ff/bf opacity is ported in
+    Phase 0.5.4: ``ff_pairs`` / ``bf_species`` non-empty are accepted
+    and processed via the precomputed ``ff_stored`` / ``bf_stored``
+    arrays (built by POSEIDON's ``opacity_tables(...)`` using
+    ``_h_minus.H_minus_free_free`` and ``_h_minus.H_minus_bound_free``
+    once the read_opacities port lifts the POSEIDON delegation).
     """
     if enable_surface == 1:
         raise NotImplementedError("surfaces deferred to v1")
     if enable_Mie == 1:
         raise NotImplementedError("Mie clouds deferred to v1")
-    if len(ff_pairs) > 0 or len(bf_species) > 0:
-        raise NotImplementedError("H-minus ff/bf opacity deferred to v1")
 
     N_species = len(chemical_species)
     N_species_active = len(active_species)
     N_cia_pairs = len(cia_pairs)
+    N_ff_pairs = len(ff_pairs)
+    N_bf_species = len(bf_species)
     N_wl = len(wl)
     N_layers = len(P)
 
@@ -109,6 +114,18 @@ def extinction(
                     n_cia_2 = n_level * X_cia[1, q, i, j, k]
                     n_n_cia = n_cia_1 * n_cia_2
                     kappa_gas[i, j, k, :] += n_n_cia * cia_stored[q, idx_T_fine, :]
+
+                # H-minus free-free (POSEIDON absorption.py:1127-1137).
+                for q in range(N_ff_pairs):
+                    n_ff_1 = n_level * X_ff[0, q, i, j, k]
+                    n_ff_2 = n_level * X_ff[1, q, i, j, k]
+                    n_n_ff = n_ff_1 * n_ff_2
+                    kappa_gas[i, j, k, :] += n_n_ff * ff_stored[q, idx_T_fine, :]
+
+                # H-minus bound-free (POSEIDON absorption.py:1140-1148).
+                for q in range(N_bf_species):
+                    n_q = n_level * X_bf[q, i, j, k]
+                    kappa_gas[i, j, k, :] += n_q * bf_stored[q, :]
 
                 for q in range(N_species_active):
                     n_q = n_level * X_active[q, i, j, k]
