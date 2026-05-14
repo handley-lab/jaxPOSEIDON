@@ -153,18 +153,8 @@ def test_v0_config_accepts_k2_18b_one_offset():
             ),
             "stellar_contam",
         ),
-        # Phase 0.5.3: surface=True is now supported (parameter parsing only;
-        # spectrum effect lands in Phase 0.5.13d).
-        (
-            dict(
-                PT_profile="Madhu",
-                X_profile="isochem",
-                cloud_model="MacMad17",
-                cloud_dim=2,
-                high_res_method="x",
-            ),
-            "High-resolution",
-        ),
+        # Phase 0.5.3: surface=True is now supported (parameter parsing only).
+        # Phase 0.5.16: high_res_method is now accepted at the parameter layer.
         (
             dict(
                 PT_profile="Madhu",

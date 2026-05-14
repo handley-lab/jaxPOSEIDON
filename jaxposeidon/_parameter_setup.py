@@ -174,8 +174,8 @@ def assert_v0_model_config(
         raise NotImplementedError(
             f"surface_model={surface_model!r} not a known POSEIDON option"
         )
-    if high_res_method is not None:
-        raise NotImplementedError("High-resolution mode is deferred to v1")
+    # high_res_method is a list/string of method names; POSEIDON validates
+    # internally at retrieval time. No setup-layer rejection here.
     if opaque_Iceberg or list(aerosol_species):
         raise NotImplementedError("Iceberg/Mie aerosols are deferred to v1")
     if list(species_EM_gradient) or list(species_DN_gradient):
@@ -482,8 +482,22 @@ def assign_free_params(
         params += ["b", "x_tol"]
         N_error_params = 2
 
-    # High-resolution (always empty in v0)
-    N_high_res_params = 0
+    # High-resolution (parameters.py:1068-1090)
+    if high_res_method is not None:
+        high_res_params += ["K_p", "V_sys"]
+        if not fix_W_conv_high_res:
+            high_res_params += ["W_conv"]
+        if not fix_Delta_phi_high_res:
+            high_res_params += ["Delta_phi"]
+        if not fix_alpha_high_res:
+            if alpha_high_res_option == "linear":
+                high_res_params += ["alpha_HR"]
+            elif alpha_high_res_option == "log":
+                high_res_params += ["log_alpha_HR"]
+        if not fix_beta_high_res:
+            high_res_params += ["beta_HR"]
+    N_high_res_params = len(high_res_params)
+    params += high_res_params
 
     # Surface (parameters.py:1101-1124)
     if not disable_atmosphere:
