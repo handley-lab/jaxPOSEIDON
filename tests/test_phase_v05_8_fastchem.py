@@ -60,6 +60,20 @@ def test_load_chemistry_grid_synthetic_fixture(tmp_path, monkeypatch):
     )
 
 
+def test_load_chemistry_grid_matches_poseidon(tmp_path, monkeypatch):
+    """Parity vs POSEIDON.chemistry.load_chemistry_grid on the same fixture."""
+    from POSEIDON.chemistry import load_chemistry_grid as p_load
+    _synthetic_fastchem_grid(tmp_path)
+    monkeypatch.setenv("POSEIDON_input_data", str(tmp_path))
+    ours = _fastchem_grid_loader.load_chemistry_grid(["H2O", "CH4"])
+    theirs = p_load(["H2O", "CH4"])
+    assert ours["grid"] == theirs["grid"]
+    for key in ("T_grid", "P_grid", "Met_grid", "C_to_O_grid"):
+        np.testing.assert_array_equal(ours[key], theirs[key])
+    # log_X_grid: POSEIDON allocates via MPI shared memory; values must match.
+    np.testing.assert_array_equal(ours["log_X_grid"], np.asarray(theirs["log_X_grid"]))
+
+
 def test_load_chemistry_grid_rejects_unknown_grid():
     with pytest.raises(Exception, match="unsupported chemistry grid"):
         _fastchem_grid_loader.load_chemistry_grid(["H2O"], grid="unknown")
@@ -160,6 +174,38 @@ def test_interpolate_log_X_grid_3D_T_matches_poseidon():
     ours = _chemistry.interpolate_log_X_grid(**args)
     theirs = p_interp(**args)
     np.testing.assert_allclose(ours, theirs, atol=0, rtol=1e-13)
+
+
+def test_interpolate_log_X_grid_single_string_species_array_equivalence():
+    """Single string `chemical_species` argument.
+
+    Note: POSEIDON's `np.where(chemical_species == species)` crashes in
+    modern numpy when chemical_species is a Python string (0-d nonzero
+    raises). The intended POSEIDON behavior is equivalence with the
+    single-element array case; the port asserts that against itself
+    (since POSEIDON cannot execute this branch).
+    """
+    grid = _build_grid_dict()
+    args = dict(
+        chemistry_grid=grid,
+        log_P=np.array([0.0, -2.0]),
+        T=np.array([1500.0, 1000.0]),
+        C_to_O=0.55,
+        log_Met=0.0,
+    )
+    out_string = _chemistry.interpolate_log_X_grid(
+        **args, chemical_species="H2O", return_dict=False,
+    )
+    out_array = _chemistry.interpolate_log_X_grid(
+        **args, chemical_species=np.array(["H2O"]), return_dict=False,
+    )
+    np.testing.assert_array_equal(out_string, out_array[0])
+    # return_dict path
+    out_dict = _chemistry.interpolate_log_X_grid(
+        **args, chemical_species="H2O", return_dict=True,
+    )
+    assert set(out_dict.keys()) == {"H2O"}
+    np.testing.assert_array_equal(out_dict["H2O"], out_string)
 
 
 def test_interpolate_log_X_grid_return_dict_matches_poseidon():

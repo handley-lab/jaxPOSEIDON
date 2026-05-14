@@ -108,7 +108,16 @@ def interpolate_log_X_grid(
             log_Met = np.full(max_len, log_Met)
 
     def interpolate(species):
-        q = np.where(np.asarray(chemical_species) == species)[0][0]
+        if isinstance(chemical_species, str):
+            # POSEIDON's `np.where(chemical_species == species)` is broken in
+            # modern numpy when `chemical_species` is a Python string (0-d
+            # nonzero raises ValueError). The intended behaviour is q=0 when
+            # the requested species matches the single-string input.
+            if species != chemical_species:
+                raise KeyError(species)
+            q = 0
+        else:
+            q = np.where(np.asarray(chemical_species) == species)[0][0]
         grid_interp = RegularGridInterpolator(
             (np.log10(Met_grid), C_to_O_grid, T_grid, np.log10(P_grid)),
             log_X_grid[q, :, :, :, :],
