@@ -17,8 +17,6 @@ import os
 
 import h5py
 
-SUPPORTED_OPACITY_DATABASES = frozenset({"High-T", "Temperate"})
-
 
 def open_opacity_files(opacity_database="High-T", database_version="1.3"):
     """Open POSEIDON's molecular + CIA HDF5 opacity files.
@@ -27,11 +25,6 @@ def open_opacity_files(opacity_database="High-T", database_version="1.3"):
     `absorption.py:1794-1818`. Returns `(opac_file, cia_file)` open
     h5py.File handles. Caller is responsible for closing them.
     """
-    if opacity_database not in SUPPORTED_OPACITY_DATABASES:
-        raise Exception(
-            f"Unsupported opacity database {opacity_database!r}; "
-            f"must be one of {sorted(SUPPORTED_OPACITY_DATABASES)}."
-        )
     input_file_path = os.environ["POSEIDON_input_data"]  # noqa: SIM112
 
     if opacity_database == "High-T":
@@ -52,7 +45,7 @@ def open_opacity_files(opacity_database="High-T", database_version="1.3"):
                 "Invalid opacity database version.\n"
                 "The options are: '1.0', '1.2', or '1.3."
             )
-    else:  # Temperate
+    elif opacity_database == "Temperate":
         opac_path = os.path.join(
             input_file_path, "opacity", "Opacity_database_0.01cm-1_Temperate.hdf5"
         )
