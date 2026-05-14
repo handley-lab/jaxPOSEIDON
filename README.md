@@ -122,6 +122,19 @@ orders of magnitude inside the plan's 1 ppm target:
 
 Reproduce with `python scripts/generate_{parity_figures,binning_figure,sweep_histogram}.py`.
 
+## How this library was generated
+
+jaxPOSEIDON v0 was produced in a single AI-assisted [Claude Code](https://www.anthropic.com/claude-code)
+session using the reference-guided-translation workflow first
+demonstrated with [jaxwavelets](https://github.com/handley-lab/jaxwavelets).
+POSEIDON is the numerical oracle; every test asserts equivalence
+against POSEIDON to component-specific tolerances. Implementation
+proceeded phase-by-phase with adversarial external-LLM review
+(`mcp__llm__review`) against the plan and the POSEIDON source after
+every phase. See [`CASE_STUDY.md`](CASE_STUDY.md) for the full account
+— what worked, what required human judgment, what the agent did badly
+and how it was caught.
+
 ## Attribution
 
 POSEIDON: Ryan J. MacDonald (2022, BSD-3).
