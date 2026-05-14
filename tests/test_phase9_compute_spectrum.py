@@ -153,12 +153,60 @@ def test_compute_spectrum_rejects_gpu_device():
         j_compute_spectrum(planet, star, model, atmosphere, opac, wl, device="gpu")
 
 
-def test_compute_spectrum_rejects_disable_continuum():
+def test_compute_spectrum_save_spectrum_writes_file(tmp_path, monkeypatch):
+    """Phase 0.5.17a wired save_spectrum through _output.write_spectrum."""
+    import os
+
     planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
-    with pytest.raises(NotImplementedError, match="disable_continuum"):
-        j_compute_spectrum(
-            planet, star, model, atmosphere, opac, wl, disable_continuum=True
-        )
+    model["model_name"] = "test_model"
+    monkeypatch.chdir(tmp_path)
+    s = j_compute_spectrum(
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        save_spectrum=True,
+    )
+    spec_path = (
+        tmp_path
+        / "POSEIDON_output"
+        / planet["planet_name"]
+        / "spectra"
+        / (f"{planet['planet_name']}_test_model_spectrum.txt")
+    )
+    assert os.path.isfile(spec_path)
+    rows = np.loadtxt(spec_path)
+    # write_spectrum uses %.8e formatting → minor rounding on round-trip.
+    np.testing.assert_allclose(rows[:, 1], s, atol=0, rtol=1e-7)
+
+
+def test_compute_spectrum_disable_continuum_zeroes_continuum():
+    """Phase 0.5.17c wired disable_continuum through extinction() —
+    the spectrum should change relative to the default."""
+    planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
+    s_on = j_compute_spectrum(
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        disable_continuum=False,
+    )
+    s_off = j_compute_spectrum(
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        disable_continuum=True,
+    )
+    # Disabling continuum must change the spectrum (the Rayleigh oracle
+    # has non-trivial Rayleigh + CIA contributions to remove).
+    assert np.any(np.abs(s_on - s_off) > 0.0)
 
 
 @pytest.mark.parametrize("cloud_model", ["Iceberg", "Mie", "eddysed"])

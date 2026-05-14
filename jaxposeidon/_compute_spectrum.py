@@ -69,17 +69,20 @@ def compute_spectrum(
     """
     # --- v0-envelope guards BEFORE any atmosphere-dependent computation ---
     if device != "cpu":
-        raise NotImplementedError(f"device={device!r} (only cpu in v0)")
-    if save_spectrum:
-        raise NotImplementedError("save_spectrum=True (file I/O) is v1")
-    if disable_continuum:
         raise NotImplementedError(
-            "disable_continuum=True is v1 (CIA/Rayleigh always on in v0)"
+            f"device={device!r}: jaxposeidon v0.5 is CPU/numpy parity only; "
+            "GPU is the v1 JAX-trace work."
         )
     if return_albedo:
-        raise NotImplementedError("return_albedo=True is for emission (v1)")
+        raise NotImplementedError(
+            "return_albedo=True applies to emission/reflection spectrum_types; "
+            "the spectrum_type dispatch wiring is the Phase 0.5.13c follow-up."
+        )
     if len(kappa_contributions) or len(cloud_properties_contributions):
-        raise NotImplementedError("contributions.py path is v1")
+        raise NotImplementedError(
+            "kappa_contributions / cloud_properties_contributions are the "
+            "Phase 0.5.17b follow-up."
+        )
 
     disable_atmosphere = model["disable_atmosphere"]
     if disable_atmosphere:
@@ -217,6 +220,7 @@ def compute_spectrum(
         enable_Mie=0,
         n_aerosol_array=n_aerosol,
         sigma_Mie_array=sigma_ext_cloud,
+        disable_continuum=disable_continuum,
     )
 
     # ----- Phase 7: TRIDENT (POSEIDON core.py:1841-1844) ---------------------
@@ -240,4 +244,15 @@ def compute_spectrum(
         phi_edge=phi_edge,
         theta_edge=theta_edge,
     )
+
+    if save_spectrum:
+        from jaxposeidon._output import write_spectrum
+
+        write_spectrum(
+            planet_name=planet["planet_name"],
+            model_name=model["model_name"],
+            spectrum=spectrum,
+            wl=wl,
+        )
+
     return spectrum
