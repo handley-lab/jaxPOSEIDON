@@ -703,14 +703,13 @@ def test_profiles_chem_eq_without_grid_raises():
         _atmosphere.profiles(**cfg)
 
 
-def test_chemistry_stub_module_imports_and_raises():
-    """_chemistry.py is a v0 stub — equilibrium chemistry entry points raise."""
+def test_chemistry_module_exports_load_and_interpolate():
+    """Phase 0.5.8: _chemistry.py now ports POSEIDON's chem_eq surface;
+    parity tests live in tests/test_phase_v05_8_fastchem.py."""
     from jaxposeidon import _chemistry
 
-    with pytest.raises(NotImplementedError, match="chem_eq|FastChem|Equilibrium"):
-        _chemistry.interpolate_log_X_grid()
-    with pytest.raises(NotImplementedError):
-        _chemistry.load_chemistry_grid()
+    assert callable(_chemistry.load_chemistry_grid)
+    assert callable(_chemistry.interpolate_log_X_grid)
 
 
 def test_species_data_masses_local_table():
