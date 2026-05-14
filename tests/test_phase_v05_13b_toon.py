@@ -242,6 +242,164 @@ def test_reflection_Toon_matches_poseidon():
     np.testing.assert_allclose(A_ours, A_theirs, atol=0, rtol=1e-10)
 
 
+@pytest.mark.parametrize("hard_surface", [0, 1])
+def test_emission_Toon_hard_surface_matches_poseidon(hard_surface):
+    """emission_Toon parity for both gas-giant (hard_surface=0) and terrestrial
+    (hard_surface=1) boundary conditions."""
+    from POSEIDON.emission import emission_Toon as p_eT
+
+    rng = np.random.default_rng(0)
+    cfg = _toon_fixture(rng)
+    surf_reflect = (
+        0.3 * np.ones(len(cfg["wl"])) if hard_surface else np.zeros(len(cfg["wl"]))
+    )
+    F_ours, _ = _emission.emission_Toon(
+        cfg["P"],
+        cfg["T"],
+        cfg["wl"],
+        cfg["dtau_tot"].copy(),
+        cfg["kappa_Ray"].copy(),
+        cfg["kappa_cloud"].copy(),
+        cfg["kappa_tot"].copy(),
+        cfg["w_cloud"].copy(),
+        cfg["g_cloud"].copy(),
+        cfg["zone_idx"],
+        surf_reflect.copy(),
+        cfg["kappa_cloud_seperate"].copy(),
+        hard_surface=hard_surface,
+        T_surf=1500.0,
+    )
+    F_theirs, _ = p_eT(
+        cfg["P"],
+        cfg["T"],
+        cfg["wl"],
+        cfg["dtau_tot"].copy(),
+        cfg["kappa_Ray"].copy(),
+        cfg["kappa_cloud"].copy(),
+        cfg["kappa_tot"].copy(),
+        cfg["w_cloud"].copy(),
+        cfg["g_cloud"].copy(),
+        cfg["zone_idx"],
+        surf_reflect.copy(),
+        cfg["kappa_cloud_seperate"].copy(),
+        hard_surface=hard_surface,
+        T_surf=1500.0,
+    )
+    np.testing.assert_allclose(F_ours, F_theirs, atol=0, rtol=1e-10)
+
+
+@pytest.mark.parametrize("toon_coefficients", [0, 1])
+def test_reflection_Toon_toon_coefficients_matches_poseidon(toon_coefficients):
+    """reflection_Toon parity for quadrature (0) and Eddington (1) Toon coefficients."""
+    from POSEIDON.emission import reflection_Toon as p_rT
+
+    rng = np.random.default_rng(0)
+    cfg = _toon_fixture(rng)
+    A_ours = _emission.reflection_Toon(
+        cfg["P"],
+        cfg["wl"],
+        cfg["dtau_tot"].copy(),
+        cfg["kappa_Ray"].copy(),
+        cfg["kappa_cloud"].copy(),
+        cfg["kappa_tot"].copy(),
+        cfg["w_cloud"].copy(),
+        cfg["g_cloud"].copy(),
+        cfg["zone_idx"],
+        cfg["surf_reflect"].copy(),
+        cfg["kappa_cloud_seperate"].copy(),
+        toon_coefficients=toon_coefficients,
+    )
+    A_theirs = p_rT(
+        cfg["P"],
+        cfg["wl"],
+        cfg["dtau_tot"].copy(),
+        cfg["kappa_Ray"].copy(),
+        cfg["kappa_cloud"].copy(),
+        cfg["kappa_tot"].copy(),
+        cfg["w_cloud"].copy(),
+        cfg["g_cloud"].copy(),
+        cfg["zone_idx"],
+        cfg["surf_reflect"].copy(),
+        cfg["kappa_cloud_seperate"].copy(),
+        toon_coefficients=toon_coefficients,
+    )
+    np.testing.assert_allclose(A_ours, A_theirs, atol=0, rtol=1e-10)
+
+
+@pytest.mark.parametrize("multi_phase", [0, 1])
+def test_reflection_Toon_multi_phase_matches_poseidon(multi_phase):
+    """reflection_Toon parity for N=2 (0) and N=1 (1) Legendre multi-scattering."""
+    from POSEIDON.emission import reflection_Toon as p_rT
+
+    rng = np.random.default_rng(0)
+    cfg = _toon_fixture(rng)
+    A_ours = _emission.reflection_Toon(
+        cfg["P"],
+        cfg["wl"],
+        cfg["dtau_tot"].copy(),
+        cfg["kappa_Ray"].copy(),
+        cfg["kappa_cloud"].copy(),
+        cfg["kappa_tot"].copy(),
+        cfg["w_cloud"].copy(),
+        cfg["g_cloud"].copy(),
+        cfg["zone_idx"],
+        cfg["surf_reflect"].copy(),
+        cfg["kappa_cloud_seperate"].copy(),
+        multi_phase=multi_phase,
+    )
+    A_theirs = p_rT(
+        cfg["P"],
+        cfg["wl"],
+        cfg["dtau_tot"].copy(),
+        cfg["kappa_Ray"].copy(),
+        cfg["kappa_cloud"].copy(),
+        cfg["kappa_tot"].copy(),
+        cfg["w_cloud"].copy(),
+        cfg["g_cloud"].copy(),
+        cfg["zone_idx"],
+        cfg["surf_reflect"].copy(),
+        cfg["kappa_cloud_seperate"].copy(),
+        multi_phase=multi_phase,
+    )
+    np.testing.assert_allclose(A_ours, A_theirs, atol=0, rtol=1e-10)
+
+
+def test_reflection_Toon_nonzero_surf_reflect_matches_poseidon():
+    """reflection_Toon parity with a non-zero (terrestrial) surface."""
+    from POSEIDON.emission import reflection_Toon as p_rT
+
+    rng = np.random.default_rng(0)
+    cfg = _toon_fixture(rng)
+    surf_reflect = 0.4 * np.ones(len(cfg["wl"]))
+    A_ours = _emission.reflection_Toon(
+        cfg["P"],
+        cfg["wl"],
+        cfg["dtau_tot"].copy(),
+        cfg["kappa_Ray"].copy(),
+        cfg["kappa_cloud"].copy(),
+        cfg["kappa_tot"].copy(),
+        cfg["w_cloud"].copy(),
+        cfg["g_cloud"].copy(),
+        cfg["zone_idx"],
+        surf_reflect.copy(),
+        cfg["kappa_cloud_seperate"].copy(),
+    )
+    A_theirs = p_rT(
+        cfg["P"],
+        cfg["wl"],
+        cfg["dtau_tot"].copy(),
+        cfg["kappa_Ray"].copy(),
+        cfg["kappa_cloud"].copy(),
+        cfg["kappa_tot"].copy(),
+        cfg["w_cloud"].copy(),
+        cfg["g_cloud"].copy(),
+        cfg["zone_idx"],
+        surf_reflect.copy(),
+        cfg["kappa_cloud_seperate"].copy(),
+    )
+    np.testing.assert_allclose(A_ours, A_theirs, atol=0, rtol=1e-10)
+
+
 def test_reflection_bare_surface_matches_poseidon():
     from POSEIDON.emission import reflection_bare_surface as p_rb
 

@@ -312,7 +312,7 @@ def emission_Toon(
     )
     colatitude = np.arccos(0.0)
     f = np.sin(colatitude)
-    ubar1 = np.outer(np.cos(longitude), f)  # noqa: F841 — kept for parity
+    ubar1 = np.outer(np.cos(longitude), f)  # noqa: F841
 
     mu1 = 0.5
     all_b = planck_lambda_arr(T_level, wl)
@@ -476,6 +476,11 @@ def reflection_Toon(
 
     Bit-equivalent port of POSEIDON `emission.py:976-1573`. TTHG+Rayleigh
     single-scattering phase function with quadrature Toon coefficients.
+
+    Note: `single_phase` is exposed for API parity with POSEIDON but is
+    inert — POSEIDON only retains the `single_phase==3` (TTHG_ray) branch
+    active; the other three branches (`0`/`'cahoy'`, `1`/`'OTHG'`,
+    `2`/`'TTHG'`) are commented out in POSEIDON's source.
     """
     N_wl = len(wl)
     N_layer = len(P)
