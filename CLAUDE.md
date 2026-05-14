@@ -56,9 +56,13 @@ This is scientific code, not a web service.
 - `_data.py` — offsets, error inflation, Gaussian likelihood.
 - `_priors.py` — unit-cube prior transform.
 - `_constants.py`, `_species_data.py` — build-time-extracted POSEIDON tables.
-- `core.py` — public API mirroring POSEIDON's
-  (`create_star`, `create_planet`, `define_model`, `read_opacities`,
-  `make_atmosphere`, `compute_spectrum`, `load_data`).
+- `core.py` — v0 public API re-exports (`compute_spectrum`,
+  `bin_spectrum_to_data`, `loglikelihood`, `prior_transform`,
+  `make_loglikelihood`, `load_data`, `init_instrument`, ...).
+  POSEIDON setup functions (`create_star`, `create_planet`,
+  `define_model`, `read_opacities`, `make_atmosphere`) are NOT
+  re-exported in v0 — callers use POSEIDON for setup and jaxposeidon
+  for the ported hot path.
 
 Do not cross these concerns. If you need cloud info in a transmission
 function, pass it in.

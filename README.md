@@ -1,8 +1,11 @@
 # jaxposeidon
 
 JAX-friendly port of [POSEIDON](https://github.com/MartianColonist/POSEIDON)'s
-transmission-spectroscopy forward model, validated against POSEIDON at
-FP-precision tolerances on ≈900 parametric regression cases.
+transmission-spectroscopy forward model. **1435 passing tests** validate
+against POSEIDON, including 396 end-to-end forward-model regression
+cases (atmosphere × MacMad17 cloud parameter grid) and 768 parameter-
+ordering parity cases, plus combinatorial likelihood/retrieval
+matrices.
 
 ## Status (v0)
 
@@ -21,8 +24,8 @@ All v0 phases approved by adversarial review against the POSEIDON source:
 | 9 | End-to-end `compute_spectrum` + 396-case parity sweep | APPROVED |
 | 10 | Prior transform + retrieval-driver scaffold | APPROVED |
 
-Phase 6 (stellar contamination) and Phase 11 (packaging / PyPI) are
-v0/v1 deferred work; see the plan file for a complete deferral map.
+Phase 6 (stellar contamination) is v1-deferred; v0 packaging/docs is
+the final piece — see the plan file for the complete deferral map.
 
 ## What's in v0
 
