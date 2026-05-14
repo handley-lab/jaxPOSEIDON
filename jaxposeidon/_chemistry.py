@@ -9,6 +9,10 @@ exact primitive).
 `load_chemistry_grid` is re-exported here from
 `_fastchem_grid_loader` for callers that expect POSEIDON's
 `from POSEIDON.chemistry import load_chemistry_grid` pattern.
+
+Documented divergence (see `MISMATCHES.md`): POSEIDON's string-valued
+`chemical_species` path crashes on numpy >= 2.x; the port handles it
+explicitly while preserving the iterable behaviour bit-exactly.
 """
 
 import numpy as np
@@ -109,10 +113,6 @@ def interpolate_log_X_grid(
 
     def interpolate(species):
         if isinstance(chemical_species, str):
-            # POSEIDON's `np.where(chemical_species == species)` is broken in
-            # modern numpy when `chemical_species` is a Python string (0-d
-            # nonzero raises ValueError). The intended behaviour is q=0 when
-            # the requested species matches the single-string input.
             if species != chemical_species:
                 raise KeyError(species)
             q = 0
