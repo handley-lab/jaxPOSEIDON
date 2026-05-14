@@ -65,7 +65,18 @@ function, pass it in.
 
 ## 5. Tests assert equivalence against POSEIDON
 
-- Every test compares JAX output to POSEIDON output at the same input.
+- Where a POSEIDON function is directly callable in isolation, every test
+  compares jaxposeidon output to POSEIDON's at the same input
+  (`POSEIDON.transmission.TRIDENT`, `POSEIDON.core.compute_spectrum`,
+  `POSEIDON.instrument.bin_spectrum_to_data`, etc.).
+- Where the POSEIDON code under test lives inside a closure that captures
+  retrieval state (POSEIDON's `Prior(...)` inside `run_retrieval`,
+  POSEIDON's `LogLikelihood(...)` inside `run_retrieval`,
+  `init_instrument(...)` indirectly via `reference_data` dispatch), tests
+  compare against a **line-for-line replication of the POSEIDON source**
+  with explicit `POSEIDON/...:line` references in the helper. Test names
+  end in `_replicates_poseidon_formula_*` and the module docstring
+  documents why direct invocation is impossible.
 - Tolerances are component-specific (see plan).
 - Do not validate against textbook formulas unless POSEIDON also validates
   against them in `tests/test_TRIDENT.py`.

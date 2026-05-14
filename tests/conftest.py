@@ -1,17 +1,15 @@
 """pytest configuration for jaxposeidon tests.
 
-Synthetic HDF5 opacity fixtures are constructed here per the plan:
-- Smoke tests (testing=True) only need a synthetic
-  `opacity/Opacity_database_cia.hdf5`.
-- Molecular tests (testing=False) additionally need a synthetic
-  `opacity/Opacity_database_v1.3.hdf5` containing at least `H2O/log(P)`
-  (POSEIDON reads the pressure grid from this group unconditionally —
-  see `POSEIDON/POSEIDON/absorption.py:806-808`).
+Phase tests that need POSEIDON's HDF5 fixtures build them in-tempdir
+per-module (see e.g. `tests/test_phase9_compute_spectrum.py`,
+`tests/test_phase9_sweep.py`, `tests/test_phase10_retrieval.py` for
+the H2-H2 / H2-He CIA pattern, and the inline `tmp_path` synthetic
+`Opacity_database_v1.3.hdf5` build in `test_phase9_compute_spectrum`'s
+molecular opacity test).
 
-These fixtures are not yet implemented — Phase 3 (opacity preprocessing)
-will populate them. For Phase 0 we rely on the user's real
-`POSEIDON_input_data` directory being on PATH if any test that needs
-molecular HDF5 is run.
+The session-scoped `poseidon_input_data` fixture below is for tests
+that want the *real* opacity database; it skips when
+`POSEIDON_input_data` is unset.
 """
 
 import os
@@ -20,11 +18,12 @@ import pytest
 
 @pytest.fixture(scope="session")
 def poseidon_input_data():
-    """Path to POSEIDON's opacity database; required for non-testing-mode runs."""
+    """Real POSEIDON opacity database path; skip when not provided."""
     p = os.environ.get("POSEIDON_input_data")
     if not p:
         pytest.skip(
             "POSEIDON_input_data env var not set; skipping tests that need "
-            "the opacity database. Phase 3 will add synthetic fixtures."
+            "the real opacity database. Synthetic HDF5 fixtures are built "
+            "per-test where applicable."
         )
     return p

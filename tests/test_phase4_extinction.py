@@ -74,9 +74,11 @@ def test_extinction_matches_poseidon(enable_haze, enable_deck):
         cfg["P_surf"], cfg["enable_Mie"], cfg["n_aerosol_array"],
         cfg["sigma_Mie_array"], cfg["P_deep"],
     )
-    # Compare all four outputs.
+    # Compare all four outputs at FP precision. POSEIDON's numba path may
+    # reduce in a slightly different order than numpy/JAX, producing
+    # ULP-scale residuals (~4e-25 absolute) on the (1,1) parametric case.
     for a, b in zip(ours, theirs):
-        np.testing.assert_allclose(a, b, atol=0, rtol=0)
+        np.testing.assert_allclose(a, b, atol=1e-22, rtol=1e-13)
 
 
 def test_extinction_rejects_surface():

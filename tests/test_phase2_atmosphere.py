@@ -414,6 +414,8 @@ def test_profiles_madhu_rejects_invalid_pressure_ordering():
         cfg["active_species"], cfg["CIA_pairs"], cfg["ff_pairs"], cfg["bf_species"],
         1, 1, 0.0, 0.0, np.array([0.0]), np.array([0.0]),
         np.array([], dtype=str), 0.17,
+        None, None, 10.0, None, None, False,
+        cfg["constant_gravity"],
     )
     assert theirs[-1] is False
 
