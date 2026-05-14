@@ -42,6 +42,22 @@ def test_vactoair_matches_poseidon():
     )
 
 
+def test_sysrem_matches_poseidon():
+    """SYSREM iterative detrending parity (Tamuz, Mazeh & Zucker 2005)."""
+    from POSEIDON.high_res import sysrem as p_sysrem
+    rng = np.random.default_rng(0)
+    nphi, npix = 8, 50
+    # Synthetic blaze-corrected order with a few systematic components
+    base = rng.standard_normal(npix) * 0.05
+    phases = rng.standard_normal(nphi)
+    data_array = np.outer(phases, base) + rng.standard_normal((nphi, npix)) * 0.01
+    uncertainties = 0.01 * np.ones((nphi, npix))
+    res_ours, U_ours = _high_res.sysrem(data_array.copy(), uncertainties.copy(), niter=3)
+    res_theirs, U_theirs = p_sysrem(data_array.copy(), uncertainties.copy(), niter=3)
+    np.testing.assert_allclose(res_ours, res_theirs, atol=0, rtol=1e-13)
+    np.testing.assert_allclose(U_ours, U_theirs, atol=0, rtol=1e-13)
+
+
 def test_airtovac_inverse_vactoair():
     wl = np.linspace(0.4, 5.0, 100)
     np.testing.assert_allclose(

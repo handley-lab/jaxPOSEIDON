@@ -43,25 +43,45 @@ def vactoair(wlum):
 def sysrem(data_array, uncertainties, niter=15):
     """Iterative `sysrem` detrending (Tamuz, Mazeh & Zucker 2005).
 
-    Bit-equivalent port of POSEIDON `high_res.py:179-256`. Returns the
-    residual array after `niter` cycles of one-component fits.
+    Bit-equivalent port of POSEIDON `high_res.py:179-256`. Returns
+    `(residuals, U)`: filtered (nphi × npix) residuals and basis vectors
+    `U` of shape `(nphi, niter+1)`.
     """
-    Npix, Nframes = data_array.shape
-    residuals = data_array.copy()
-    w = 1.0 / uncertainties**2
+    data_array = data_array.T
+    uncertainties = uncertainties.T
+    npix, nphi = data_array.shape
 
-    for _ in range(niter):
-        c = np.ones(Nframes)
-        a = np.zeros(Npix)
-        # 2-step alternating optimisation
-        for _ in range(15):
-            numer_a = (residuals * c[np.newaxis, :] * w).sum(axis=1)
-            denom_a = (c[np.newaxis, :] ** 2 * w).sum(axis=1)
-            a = numer_a / denom_a
+    residuals = np.zeros((npix, nphi))
+    for i, light_curve in enumerate(data_array):
+        residuals[i] = light_curve - np.median(light_curve)
 
-            numer_c = (residuals * a[:, np.newaxis] * w).sum(axis=0)
-            denom_c = (a[:, np.newaxis] ** 2 * w).sum(axis=0)
-            c = numer_c / denom_c
+    U = np.zeros((nphi, niter + 1))
 
-        residuals -= np.outer(a, c)
-    return residuals
+    for i in range(niter):
+        w = np.zeros(npix)
+        u = np.ones(nphi)
+
+        for _ in range(10):
+            for pix in range(npix):
+                err_squared = uncertainties[pix] ** 2
+                numerator = np.sum(u * residuals[pix] / err_squared)
+                denominator = np.sum(u**2 / err_squared)
+                w[pix] = numerator / denominator
+
+            for phi in range(nphi):
+                err_squared = uncertainties[:, phi] ** 2
+                numerator = np.sum(w * residuals[:, phi] / err_squared)
+                denominator = np.sum(w**2 / err_squared)
+                u[phi] = numerator / denominator
+
+        systematic = np.zeros((npix, nphi))
+        for pix in range(npix):
+            for phi in range(nphi):
+                systematic[pix, phi] = u[phi] * w[pix]
+
+        residuals = residuals - systematic
+        U[:, i] = u
+
+    U[:, -1] = np.ones(nphi)
+
+    return residuals.T, U
