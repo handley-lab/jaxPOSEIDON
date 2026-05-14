@@ -1,22 +1,25 @@
-"""Atmosphere column construction for v0.
+"""Atmosphere column construction.
 
-Mirrors the v0 paths through POSEIDON's `atmosphere.py:profiles(...)`
-(`POSEIDON/atmosphere.py:2015-2493`). v0 envelope:
+Mirrors POSEIDON's `atmosphere.py:profiles(...)` (`atmosphere.py:2015-2493`).
 
-- `PT_profile in {'isotherm', 'Madhu'}`, `PT_dim == 1`
+Currently supported envelope:
+- `PT_profile` in {`isotherm`, `Madhu`, `slope`, `Pelletier`, `Guillot`,
+  `Guillot_dayside`, `Line`} with `PT_dim == 1`
 - `X_profile == 'isochem'`, `X_dim == 1`, no per-species gradients
-- `bulk_species` is one of: `['H2']`, `['H2', 'He']`, `['H', 'He']`,
-  or any single non-ghost species. H2+H+He dissociation mixture is
-  deferred.
-- `Atmosphere_dimension == 1` (N_sectors = N_zones = 1)
-- `disable_atmosphere == False`
+- `bulk_species`: `['H2']`, `['H2', 'He']`, `['H', 'He']`, or a single
+  non-ghost species (H2/H/He dissociation mixture deferred to 0.5.7)
+- `Atmosphere_dimension == 1`
 
-Numerical strategy: this port mirrors POSEIDON's algorithms exactly,
-including its float64 numpy + scipy `gaussian_filter1d(sigma=3,
-mode='nearest')` smoothing for the Madhu profile. The smoothing is
-delegated to scipy so we get bit-equivalent output to POSEIDON. A
-JAX-native gaussian smoother is a v1 work item if `jax.grad` through the
-PT parameters is needed.
+Deferred to later phases:
+- `gradient` / `two-gradients` PT profiles (0.5.9 — 2D/3D scaffolding)
+- `file_read` PT/X profiles (0.5.17 — file I/O)
+- non-isochem X_profile, dissociation, mu_back, Na_K (0.5.7)
+- chem_eq grids (0.5.8)
+- N_sectors / N_zones > 1 (0.5.9)
+
+Numerical strategy: bit-equivalent port via float64 numpy and scipy's
+`gaussian_filter1d`, `pchip_interpolate`, `special.expn`. JAX-native
+versions are a v1 work item.
 """
 
 import numpy as np
@@ -29,8 +32,8 @@ from jaxposeidon._opacity_precompute import prior_index
 from jaxposeidon._species_data import inactive_species as _INACTIVE_SPECIES_LOCAL
 from jaxposeidon._species_data import masses as _masses
 
-_V0_PT_PROFILES = {"isotherm", "Madhu"}
-_V05_PT_PROFILES_1D = {
+_V0_PT_PROFILES = frozenset({"isotherm", "Madhu"})
+_V05_PT_PROFILES_1D = frozenset({
     "isotherm",
     "Madhu",
     "slope",
@@ -38,8 +41,8 @@ _V05_PT_PROFILES_1D = {
     "Guillot",
     "Guillot_dayside",
     "Line",
-}
-_V0_X_PROFILES = {"isochem"}
+})
+_V0_X_PROFILES = frozenset({"isochem"})
 
 
 # ---------------------------------------------------------------------------
@@ -301,8 +304,8 @@ def add_bulk_component(
         X[1, :, :, :] = X_He
     elif {"H2", "H", "He"} <= bulk_set:
         raise NotImplementedError(
-            "H2/H/He dissociation bulk mixture deferred to v1 (POSEIDON "
-            "atmosphere.py:1285-1312)."
+            "H2/H/He dissociation bulk mixture deferred to Phase 0.5.7 "
+            "(POSEIDON atmosphere.py:1285-1312)."
         )
     else:
         if N_bulk_species > 1:
@@ -549,21 +552,22 @@ def profiles(
     mu_back=None,
     disable_atmosphere=False,
 ):
-    """v0 port of POSEIDON `atmosphere.py:profiles(...)` (2015-2493).
+    """Port of POSEIDON `atmosphere.py:profiles(...)` (2015-2493).
 
     Returns the same 13-tuple POSEIDON does:
         (T, n, r, r_up, r_low, dr, mu, X, X_active, X_CIA, X_ff, X_bf, physical)
     where `physical` is True/False indicating whether the configuration
     produced a valid atmosphere.
 
-    v0 envelope (see plan Phase 2):
+    Supported envelope:
       - disable_atmosphere=False
-      - PT_profile in {'isotherm', 'Madhu'} with len(PT_state)==1 or 6
-      - X_profile == 'isochem'
-      - X_dim=1, no species gradients
-      - bulk_species per add_bulk_component v0 set
+      - PT_profile in {`isotherm`, `Madhu`, `slope`, `Pelletier`, `Guillot`,
+        `Guillot_dayside`, `Line`} (1D only)
+      - X_profile == 'isochem', X_dim=1, no species gradients
+      - bulk_species per `add_bulk_component`
       - N_sectors == N_zones == 1
-    Any other configuration raises NotImplementedError.
+    Any other configuration raises NotImplementedError pointing at the
+    phase where it lands.
     """
     if disable_atmosphere:
         raise NotImplementedError("v0 does not support disable_atmosphere=True")
@@ -581,15 +585,17 @@ def profiles(
             f"X_profile={X_profile!r} not in v0 ({sorted(_V0_X_PROFILES)})"
         )
     if len(species_vert_gradient) > 0:
-        raise NotImplementedError("v0 forbids per-species vertical gradients")
+        raise NotImplementedError(
+            "per-species vertical gradients deferred to Phase 0.5.7"
+        )
     if Na_K_fixed_ratio:
-        raise NotImplementedError("Na_K_fixed_ratio is deferred to v1")
+        raise NotImplementedError("Na_K_fixed_ratio deferred to Phase 0.5.7")
     if mu_back is not None:
-        raise NotImplementedError("ghost-bulk mu_back is deferred to v1")
+        raise NotImplementedError("ghost-bulk mu_back deferred to Phase 0.5.7")
     if T_input is not None or X_input is not None:
-        raise NotImplementedError("file_read PT/X are deferred to v1")
+        raise NotImplementedError("file_read PT/X deferred to Phase 0.5.17")
     if chemistry_grid is not None:
-        raise NotImplementedError("chem_eq grids are deferred to v1")
+        raise NotImplementedError("chem_eq grids deferred to Phase 0.5.8")
 
     if PT_profile == "isotherm":
         if len(PT_state) != 1:
@@ -656,7 +662,7 @@ def profiles(
     for q in range(N_species):
         sp = included_species[q]
         if sp == "ghost":
-            raise NotImplementedError("ghost bulk species deferred to v1")
+            raise NotImplementedError("ghost bulk species deferred to Phase 0.5.7")
         masses_all[q] = _masses[sp]
     mu = compute_mean_mol_mass(P, X, N_species, N_sectors, N_zones, masses_all)
 

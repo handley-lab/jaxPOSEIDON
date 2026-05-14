@@ -22,8 +22,8 @@ import numpy as np
 # ---------------------------------------------------------------------------
 # v0 configuration whitelist
 # ---------------------------------------------------------------------------
-V0_PT_PROFILES = {"isotherm", "Madhu"}
-V05_PT_PROFILES_1D = {
+V0_PT_PROFILES = frozenset({"isotherm", "Madhu"})
+V05_PT_PROFILES_1D = frozenset({
     "isotherm",
     "Madhu",
     "slope",
@@ -31,14 +31,14 @@ V05_PT_PROFILES_1D = {
     "Guillot",
     "Guillot_dayside",
     "Line",
-}
-V0_X_PROFILES = {"isochem"}
-V0_CLOUD_MODELS = {"cloud-free", "MacMad17"}
-V0_CLOUD_TYPES = {"deck", "haze", "deck_haze"}
-V0_CLOUD_DIMS = {1, 2}
-V0_REFERENCE_PARAMETERS = {"R_p_ref", "P_ref", "R_p_ref+P_ref"}
-V0_OFFSETS = {None, "single_dataset", "two_datasets", "three_datasets"}
-V0_ERROR_INFLATIONS = {None, "Line15", "Piette20", "Line15+Piette20"}
+})
+V0_X_PROFILES = frozenset({"isochem"})
+V0_CLOUD_MODELS = frozenset({"cloud-free", "MacMad17"})
+V0_CLOUD_TYPES = frozenset({"deck", "haze", "deck_haze"})
+V0_CLOUD_DIMS = frozenset({1, 2})
+V0_REFERENCE_PARAMETERS = frozenset({"R_p_ref", "P_ref", "R_p_ref+P_ref"})
+V0_OFFSETS = frozenset({None, "single_dataset", "two_datasets", "three_datasets"})
+V0_ERROR_INFLATIONS = frozenset({None, "Line15", "Piette20", "Line15+Piette20"})
 
 
 def assert_v0_model_config(
