@@ -35,8 +35,12 @@ def canonical_rayleigh_config():
     """
     from POSEIDON.constants import R_Sun, R_J, M_J
     from POSEIDON.core import (
-        create_star, create_planet, define_model,
-        read_opacities, make_atmosphere, wl_grid_constant_R,
+        create_star,
+        create_planet,
+        define_model,
+        read_opacities,
+        make_atmosphere,
+        wl_grid_constant_R,
     )
 
     # Star — POSEIDON signature: R_s, T_eff, log_g, Met
@@ -55,8 +59,13 @@ def canonical_rayleigh_config():
     log_X_params = np.array([])
 
     atmosphere = make_atmosphere(
-        planet, model, P, P_ref, R_p_ref,
-        PT_params, log_X_params,
+        planet,
+        model,
+        P,
+        P_ref,
+        R_p_ref,
+        PT_params,
+        log_X_params,
         constant_gravity=True,
     )
 
@@ -66,7 +75,11 @@ def canonical_rayleigh_config():
     log_P_fine = np.arange(-6.0, 2.2, 0.2)
 
     opac = read_opacities(
-        model, wl, "opacity_sampling", T_fine, log_P_fine,
+        model,
+        wl,
+        "opacity_sampling",
+        T_fine,
+        log_P_fine,
         testing=True,
     )
     # Mirror POSEIDON/tests/test_TRIDENT.py:96-97 — zero CIA so the oracle is
@@ -74,11 +87,18 @@ def canonical_rayleigh_config():
     opac["CIA_stored"] *= 0.0
 
     return dict(
-        star=star, planet=planet, model=model,
-        P=P, P_ref=P_ref, R_p_ref=R_p_ref,
-        PT_params=PT_params, log_X_params=log_X_params,
-        atmosphere=atmosphere, wl=wl,
-        T_fine=T_fine, log_P_fine=log_P_fine,
+        star=star,
+        planet=planet,
+        model=model,
+        P=P,
+        P_ref=P_ref,
+        R_p_ref=R_p_ref,
+        PT_params=PT_params,
+        log_X_params=log_X_params,
+        atmosphere=atmosphere,
+        wl=wl,
+        T_fine=T_fine,
+        log_P_fine=log_P_fine,
         opac=opac,
     )
 
@@ -86,9 +106,14 @@ def canonical_rayleigh_config():
 def poseidon_transmission_spectrum(cfg):
     """Run POSEIDON's compute_spectrum on a config dict from canonical_*."""
     from POSEIDON.core import compute_spectrum
+
     return compute_spectrum(
-        cfg["planet"], cfg["star"], cfg["model"],
-        cfg["atmosphere"], cfg["opac"], cfg["wl"],
+        cfg["planet"],
+        cfg["star"],
+        cfg["model"],
+        cfg["atmosphere"],
+        cfg["opac"],
+        cfg["wl"],
         spectrum_type="transmission",
     )
 

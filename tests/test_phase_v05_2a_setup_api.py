@@ -43,9 +43,9 @@ def test_wl_grid_constant_R_matches_poseidon(wl_min, wl_max, R):
 @pytest.mark.parametrize(
     "R_s,T_eff,log_g,Met",
     [
-        (6.96e8, 5772.0, 4.44, 0.0),    # Sun
-        (5.96e8, 4500.0, 4.6, -0.1),   # K-dwarf
-        (1.0e9, 6500.0, 4.0, 0.3),     # F-type
+        (6.96e8, 5772.0, 4.44, 0.0),  # Sun
+        (5.96e8, 4500.0, 4.6, -0.1),  # K-dwarf
+        (1.0e9, 6500.0, 4.0, 0.3),  # F-type
     ],
 )
 def test_create_star_blackbody_matches_poseidon(R_s, T_eff, log_g, Met):
@@ -55,14 +55,20 @@ def test_create_star_blackbody_matches_poseidon(R_s, T_eff, log_g, Met):
     theirs = p_create_star(R_s, T_eff, log_g, Met)
 
     # Compare scalar / vector fields
-    for k in ("R_s", "T_eff", "T_eff_error", "log_g_error", "Met", "log_g",
-              "stellar_grid", "stellar_contam"):
+    for k in (
+        "R_s",
+        "T_eff",
+        "T_eff_error",
+        "log_g_error",
+        "Met",
+        "log_g",
+        "stellar_grid",
+        "stellar_contam",
+    ):
         assert ours[k] == theirs[k], k
     np.testing.assert_array_equal(ours["wl_star"], theirs["wl_star"])
-    np.testing.assert_allclose(ours["I_phot"], theirs["I_phot"],
-                                atol=0, rtol=1e-14)
-    np.testing.assert_allclose(ours["F_star"], theirs["F_star"],
-                                atol=0, rtol=1e-14)
+    np.testing.assert_allclose(ours["I_phot"], theirs["I_phot"], atol=0, rtol=1e-14)
+    np.testing.assert_allclose(ours["F_star"], theirs["F_star"], atol=0, rtol=1e-14)
 
 
 def test_create_star_stellar_contam_rejected():
@@ -81,10 +87,10 @@ def test_create_star_non_blackbody_rejected():
 @pytest.mark.parametrize(
     "kwargs",
     [
-        dict(mass=1.898e27),                          # mass only
-        dict(gravity=24.79),                          # gravity only
-        dict(log_g=3.394),                            # log_g only
-        dict(mass=1.898e27, b_p=0.1, a_p=7.78e11),    # full
+        dict(mass=1.898e27),  # mass only
+        dict(gravity=24.79),  # gravity only
+        dict(log_g=3.394),  # log_g only
+        dict(mass=1.898e27, b_p=0.1, a_p=7.78e11),  # full
         dict(mass=5.972e24, T_eq=288.0, d=1.496e11),  # Earth-like
     ],
 )
@@ -95,18 +101,25 @@ def test_create_planet_matches_poseidon(kwargs):
     ours = jpo.create_planet("test", R_p, **kwargs)
     theirs = p_create_planet("test", R_p, **kwargs)
 
-    for k in ("planet_name", "planet_radius", "planet_T_eq",
-              "planet_impact_parameter", "system_distance",
-              "system_distance_error", "planet_semi_major_axis"):
-        assert ours[k] == theirs[k] or (
-            ours[k] is None and theirs[k] is None
-        ), k
-    np.testing.assert_allclose(ours["planet_radius"], theirs["planet_radius"],
-                                atol=0, rtol=0)
-    np.testing.assert_allclose(ours["planet_mass"], theirs["planet_mass"],
-                                atol=0, rtol=1e-14)
-    np.testing.assert_allclose(ours["planet_gravity"], theirs["planet_gravity"],
-                                atol=0, rtol=1e-14)
+    for k in (
+        "planet_name",
+        "planet_radius",
+        "planet_T_eq",
+        "planet_impact_parameter",
+        "system_distance",
+        "system_distance_error",
+        "planet_semi_major_axis",
+    ):
+        assert ours[k] == theirs[k] or (ours[k] is None and theirs[k] is None), k
+    np.testing.assert_allclose(
+        ours["planet_radius"], theirs["planet_radius"], atol=0, rtol=0
+    )
+    np.testing.assert_allclose(
+        ours["planet_mass"], theirs["planet_mass"], atol=0, rtol=1e-14
+    )
+    np.testing.assert_allclose(
+        ours["planet_gravity"], theirs["planet_gravity"], atol=0, rtol=1e-14
+    )
 
 
 def test_create_planet_requires_mass_or_gravity():
@@ -121,6 +134,7 @@ def test_define_model_delegates_to_poseidon():
     """v0.5.2a thin delegator. 0.5.6+ replace this with a native impl."""
     m_jpo = jpo.define_model("m", ["H2"], [], PT_profile="isotherm")
     from POSEIDON.core import define_model as p_define
+
     m_pos = p_define("m", ["H2"], [], PT_profile="isotherm")
     # Same keys and types
     assert set(m_jpo.keys()) == set(m_pos.keys())
@@ -150,8 +164,11 @@ def test_read_opacities_delegates_to_poseidon(tmp_path):
         m = jpo.define_model("m", ["H2", "He"], [], PT_profile="isotherm")
         wl = jpo.wl_grid_constant_R(1.0, 3.0, 500)
         opac = jpo.read_opacities(
-            m, wl, "opacity_sampling",
-            np.arange(700, 1110, 20), np.arange(-6.0, 2.2, 0.4),
+            m,
+            wl,
+            "opacity_sampling",
+            np.arange(700, 1110, 20),
+            np.arange(-6.0, 2.2, 0.4),
             testing=True,
         )
         assert "sigma_stored" in opac
@@ -168,8 +185,13 @@ def test_make_atmosphere_delegates_to_poseidon():
     m = jpo.define_model("m", ["H2"], [], PT_profile="isotherm")
     P = np.logspace(2, -7, 60)
     atm = jpo.make_atmosphere(
-        planet, m, P, 10.0, 6.4e7,
-        np.array([900.0]), np.array([]),
+        planet,
+        m,
+        P,
+        10.0,
+        6.4e7,
+        np.array([900.0]),
+        np.array([]),
         constant_gravity=True,
     )
     assert "P" in atm

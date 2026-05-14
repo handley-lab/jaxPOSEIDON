@@ -94,6 +94,7 @@ def test_assert_v0_model_config_rejects_unknown_settings():
 def _poseidon_assign(param_species, bulk_species, **overrides):
     """POSEIDON assign_free_params is positional; pass defaults explicitly."""
     from POSEIDON.parameters import assign_free_params as p_assign
+
     defaults = dict(
         param_species=param_species,
         bulk_species=bulk_species,
@@ -145,12 +146,18 @@ def _poseidon_assign(param_species, bulk_species, **overrides):
 
 def test_assign_free_params_matches_poseidon_free_gravity():
     ours = assign_free_params(
-        param_species=["H2O"], bulk_species=["H2", "He"],
-        PT_profile="Madhu", X_profile="isochem", cloud_model="cloud-free",
+        param_species=["H2O"],
+        bulk_species=["H2", "He"],
+        PT_profile="Madhu",
+        X_profile="isochem",
+        cloud_model="cloud-free",
         gravity_setting="free",
     )
     theirs = _poseidon_assign(
-        ["H2O"], ["H2", "He"], PT_profile="Madhu", gravity_setting="free",
+        ["H2O"],
+        ["H2", "He"],
+        PT_profile="Madhu",
+        gravity_setting="free",
     )
     np.testing.assert_array_equal(ours[0], theirs[0])
     np.testing.assert_array_equal(ours[1], theirs[1])
@@ -159,12 +166,18 @@ def test_assign_free_params_matches_poseidon_free_gravity():
 
 def test_assign_free_params_matches_poseidon_free_mass():
     ours = assign_free_params(
-        param_species=["H2O"], bulk_species=["H2", "He"],
-        PT_profile="Madhu", X_profile="isochem", cloud_model="cloud-free",
+        param_species=["H2O"],
+        bulk_species=["H2", "He"],
+        PT_profile="Madhu",
+        X_profile="isochem",
+        cloud_model="cloud-free",
         mass_setting="free",
     )
     theirs = _poseidon_assign(
-        ["H2O"], ["H2", "He"], PT_profile="Madhu", mass_setting="free",
+        ["H2O"],
+        ["H2", "He"],
+        PT_profile="Madhu",
+        mass_setting="free",
     )
     np.testing.assert_array_equal(ours[0], theirs[0])
     np.testing.assert_array_equal(ours[1], theirs[1])

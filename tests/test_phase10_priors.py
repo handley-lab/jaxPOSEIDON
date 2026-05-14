@@ -21,6 +21,7 @@ def _poseidon_prior_inplace(cube, param_names, prior_types, prior_ranges):
     """Direct line-for-line replication of POSEIDON retrieval.py:649-708
     for Atmosphere_dimension=1, non-CLR priors."""
     from scipy.special import ndtri
+
     cube = np.array(cube, dtype=np.float64).copy()
     for i, parameter in enumerate(param_names):
         ptype = prior_types[parameter]
@@ -32,13 +33,14 @@ def _poseidon_prior_inplace(cube, param_names, prior_types, prior_ranges):
         elif ptype == "sine":
             max_value = prange[1]
             if parameter in ("alpha", "beta"):
-                cube[i] = (180.0 / np.pi) * 2.0 * np.arcsin(
-                    cube[i] * np.sin((np.pi / 180.0) * (max_value / 2.0))
+                cube[i] = (
+                    (180.0 / np.pi)
+                    * 2.0
+                    * np.arcsin(cube[i] * np.sin((np.pi / 180.0) * (max_value / 2.0)))
                 )
             elif parameter == "theta_0":
                 cube[i] = (180.0 / np.pi) * np.arcsin(
-                    (2.0 * cube[i] - 1.0)
-                    * np.sin((np.pi / 180.0) * (max_value / 2.0))
+                    (2.0 * cube[i] - 1.0) * np.sin((np.pi / 180.0) * (max_value / 2.0))
                 )
     return cube
 
@@ -46,12 +48,12 @@ def _poseidon_prior_inplace(cube, param_names, prior_types, prior_ranges):
 def test_prior_transform_uniform_replicates_poseidon_formula():
     param_names = ["T", "R_p", "log_X_H2O"]
     pt = {p: "uniform" for p in param_names}
-    pr = {"T": [400.0, 2500.0], "R_p": [0.8, 1.2],
-          "log_X_H2O": [-12.0, -1.0]}
+    pr = {"T": [400.0, 2500.0], "R_p": [0.8, 1.2], "log_X_H2O": [-12.0, -1.0]}
     cube = np.array([0.0, 0.5, 1.0])
     out = prior_transform(cube, param_names, pt, pr)
     np.testing.assert_array_equal(
-        out, _poseidon_prior_inplace(cube, param_names, pt, pr),
+        out,
+        _poseidon_prior_inplace(cube, param_names, pt, pr),
     )
 
 
@@ -63,20 +65,22 @@ def test_prior_transform_gaussian_replicates_poseidon_formula():
         cube = np.array([u])
         out = prior_transform(cube, param_names, pt, pr)
         np.testing.assert_allclose(
-            out, _poseidon_prior_inplace(cube, param_names, pt, pr),
-            atol=0, rtol=0,
+            out,
+            _poseidon_prior_inplace(cube, param_names, pt, pr),
+            atol=0,
+            rtol=0,
         )
 
 
 def test_prior_transform_sine_replicates_poseidon_formula():
     param_names = ["alpha", "beta", "theta_0"]
     pt = {p: "sine" for p in param_names}
-    pr = {"alpha": [0.0, 60.0], "beta": [0.0, 30.0],
-          "theta_0": [-90.0, 90.0]}
+    pr = {"alpha": [0.0, 60.0], "beta": [0.0, 30.0], "theta_0": [-90.0, 90.0]}
     cube = np.array([0.1, 0.4, 0.7])
     out = prior_transform(cube, param_names, pt, pr)
     np.testing.assert_array_equal(
-        out, _poseidon_prior_inplace(cube, param_names, pt, pr),
+        out,
+        _poseidon_prior_inplace(cube, param_names, pt, pr),
     )
 
 
@@ -90,12 +94,12 @@ def test_prior_transform_does_not_mutate_input():
 
 def test_prior_transform_rejects_CLR():
     with pytest.raises(NotImplementedError, match="CLR"):
-        prior_transform(np.array([0.5]), ["log_X"],
-                         {"log_X": "CLR"}, {"log_X": [-12.0, -1.0]})
+        prior_transform(
+            np.array([0.5]), ["log_X"], {"log_X": "CLR"}, {"log_X": [-12.0, -1.0]}
+        )
 
 
 @pytest.mark.parametrize("ptype", ["log_uniform", "Jeffreys", "delta"])
 def test_prior_transform_rejects_unknown_prior_types(ptype):
     with pytest.raises(NotImplementedError, match="prior_type"):
-        prior_transform(np.array([0.5]), ["x"],
-                         {"x": ptype}, {"x": [0.0, 1.0]})
+        prior_transform(np.array([0.5]), ["x"], {"x": ptype}, {"x": [0.0, 1.0]})

@@ -867,9 +867,15 @@ def add_bulk_component(
 # Mean molecular mass
 # ---------------------------------------------------------------------------
 def compute_mean_mol_mass(P, X, N_species, N_sectors, N_zones, masses_all):
-    """Mean molecular mass profile in kg, per POSEIDON.atmosphere.compute_mean_mol_mass
-    (`POSEIDON/atmosphere.py:1816-1856`)."""
+    """Mean molecular mass profile in kg.
+
+    Mirrors POSEIDON `atmosphere.py:1816-1856`. Same numba-broadcast
+    workaround as `radial_profiles` when X is shaped (N, len(P), 1, 1)
+    while caller requests N_sectors > 1 or N_zones > 1.
+    """
     N_layers = len(P)
+    if X.shape != (N_species, N_layers, N_sectors, N_zones):
+        X = np.broadcast_to(X, (N_species, N_layers, N_sectors, N_zones))
     mu = np.zeros(shape=(N_layers, N_sectors, N_zones))
     for i in range(N_layers):
         for j in range(N_sectors):
@@ -887,8 +893,16 @@ def radial_profiles(P, T, g_0, R_p, P_ref, R_p_ref, mu, N_sectors, N_zones):
 
     Mirrors `POSEIDON/atmosphere.py:1494-1606` (analytic trapezoidal
     integral with 1/(1/r_0 + ∫H dlnP) form, NOT iterative).
+
+    POSEIDON's @jit numba broadcasts size-1 axes silently on `T[:, j, k]`;
+    numpy does not. To match parity, broadcast T to the full sector/zone
+    grid when caller supplies a 1D PT field.
     """
     N_layers = len(P)
+    if T.shape != (N_layers, N_sectors, N_zones):
+        T = np.broadcast_to(T, (N_layers, N_sectors, N_zones))
+    if mu.shape != (N_layers, N_sectors, N_zones):
+        mu = np.broadcast_to(mu, (N_layers, N_sectors, N_zones))
     r = np.zeros((N_layers, N_sectors, N_zones))
     r_up = np.zeros((N_layers, N_sectors, N_zones))
     r_low = np.zeros((N_layers, N_sectors, N_zones))
@@ -973,6 +987,9 @@ def mixing_ratio_categories(
     included = np.asarray(included_species)
     inactive_mask = np.isin(included, _INACTIVE_SPECIES)
 
+    if X.shape[2:] != (N_sectors, N_zones):
+        X = np.broadcast_to(X, (X.shape[0], N_layers, N_sectors, N_zones))
+
     X_active = X[~inactive_mask, :, :, :]
     X_CIA = np.zeros((2, N_CIA_pairs, N_layers, N_sectors, N_zones))
     X_ff = np.zeros((2, N_ff_pairs, N_layers, N_sectors, N_zones))
@@ -1001,10 +1018,14 @@ def mixing_ratio_categories(
 def radial_profiles_constant_g(P, T, g_0, P_ref, R_p_ref, mu, N_sectors, N_zones):
     """Constant-gravity hydrostatic radius profile.
 
-    Mirrors `POSEIDON/atmosphere.py:1609-1722`. Used by
-    test_TRIDENT.py::test_Rayleigh (`constant_gravity=True`).
+    Mirrors `POSEIDON/atmosphere.py:1609-1722`. Same numba-broadcast
+    workaround as `radial_profiles` (see its docstring).
     """
     N_layers = len(P)
+    if T.shape != (N_layers, N_sectors, N_zones):
+        T = np.broadcast_to(T, (N_layers, N_sectors, N_zones))
+    if mu.shape != (N_layers, N_sectors, N_zones):
+        mu = np.broadcast_to(mu, (N_layers, N_sectors, N_zones))
     r = np.zeros((N_layers, N_sectors, N_zones))
     r_up = np.zeros((N_layers, N_sectors, N_zones))
     r_low = np.zeros((N_layers, N_sectors, N_zones))
@@ -1298,6 +1319,11 @@ def profiles(
                 theta,
             )
         elif X_profile == "lever":
+            if N_sectors != 1 or N_zones != 1:
+                raise Exception(
+                    "Error: Lever profile currently only implemented for "
+                    "1D atmospheres."
+                )
             X_param = compute_X_lever(
                 P, log_X_state, species_has_profile, N_sectors, N_zones
             )
