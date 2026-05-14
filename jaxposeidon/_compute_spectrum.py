@@ -92,10 +92,15 @@ def compute_spectrum(
         raise NotImplementedError(
             f"spectrum_type={spectrum_type!r} (only 'transmission' in v0)"
         )
-    if opac["opacity_treatment"] not in ("opacity_sampling", "line_by_line"):
+    if opac["opacity_treatment"] != "opacity_sampling":
+        # extinction_LBL orchestrator is the follow-up — the kernel
+        # compute_kappa_LBL is implemented in _lbl.py (Phase 0.5.15), but
+        # compute_spectrum still expects the opacity-sampling opac dict
+        # layout. Once extinction_LBL lands the guard relaxes.
         raise NotImplementedError(
-            f"opacity_treatment={opac['opacity_treatment']!r} not a known "
-            "POSEIDON option (expected 'opacity_sampling' or 'line_by_line')"
+            f"opacity_treatment={opac['opacity_treatment']!r}: only "
+            "'opacity_sampling' wired into compute_spectrum currently; "
+            "extinction_LBL orchestrator is the Phase 0.5.15 follow-up."
         )
     if model.get("thermal_scattering") or model.get("reflection"):
         raise NotImplementedError("thermal_scattering / reflection are v1")
@@ -220,7 +225,10 @@ def compute_spectrum(
         enable_Mie=0,
         n_aerosol_array=n_aerosol,
         sigma_Mie_array=sigma_ext_cloud,
-        disable_continuum=disable_continuum,
+        # POSEIDON core.py passes disable_continuum to extinction_LBL only;
+        # the opacity-sampling extinction ignores it (the v0.5.17c flag
+        # remains on the function signature for LBL-mode callers but is
+        # not propagated here for opacity-sampling parity).
     )
 
     # ----- Phase 7: TRIDENT (POSEIDON core.py:1841-1844) ---------------------
