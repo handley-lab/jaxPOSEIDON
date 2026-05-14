@@ -8,13 +8,13 @@ def test_jaxposeidon_imports():
     from jaxposeidon import (
         _opacity_precompute, _opacities, _atmosphere, _chemistry, _clouds,
         _instruments, _geometry, _transmission, _parameters, _data, _priors,
-        _constants, _species_data, core,
+        _constants, _species_data, _loaddata, _compute_spectrum, core,
     )
-    assert jaxposeidon.__version__ == "0.0.1.dev0"
-    # All stub modules are importable but empty for v0 Phase 0.
+    assert jaxposeidon.__version__.startswith("0.0.")
     for mod in (_opacity_precompute, _opacities, _atmosphere, _chemistry,
                 _clouds, _instruments, _geometry, _transmission, _parameters,
-                _data, _priors, _constants, _species_data, core):
+                _data, _priors, _constants, _species_data, _loaddata,
+                _compute_spectrum, core):
         assert mod is not None
 
 

@@ -1,0 +1,164 @@
+"""compute_spectrum — v0 transmission orchestrator.
+
+Faithful port of the v0-supported portion of POSEIDON `core.py:1303-2132`
+`compute_spectrum(...)`. Wires Phases 1-7 into the public API:
+
+    atmosphere → extinction → TRIDENT → spectrum
+
+v0 envelope:
+- spectrum_type='transmission' only (emission/reflection/direct/dayside/
+  nightside/time-average raise NotImplementedError; the post-load_data
+  hot path for retrievals never asks for those in the K2-18 b config).
+- opacity_treatment='opacity_sampling' only (line-by-line LBL is v1).
+- device='cpu' only.
+- cloud_model in {'cloud-free', 'MacMad17'} only (Mie/eddysed v1).
+- No surfaces, no thermal_scattering, no reflection.
+- N_sectors/N_zones from TRIDENT geometry (1D or cloud_dim=2 patchy).
+
+Matches POSEIDON's NaN-spectrum rejection sentinel
+(`core.py:1370-1374`) for atmospheres outside the fine T-grid or marked
+non-physical upstream.
+"""
+
+import numpy as np
+
+from jaxposeidon._opacities import extinction
+from jaxposeidon._transmission import TRIDENT
+
+
+def check_atmosphere_physical(atmosphere, opac):
+    """Port of POSEIDON `core.py:1255-1300`."""
+    if atmosphere["is_physical"] is False:
+        return False
+    if opac["opacity_treatment"] == "opacity_sampling":
+        T = atmosphere["T"]
+        T_fine = opac["T_fine"]
+        if (np.max(T) > np.max(T_fine)) or (np.min(T) < np.min(T_fine)):
+            return False
+    return True
+
+
+def compute_spectrum(planet, star, model, atmosphere, opac, wl,
+                     spectrum_type="transmission", save_spectrum=False,
+                     disable_continuum=False, suppress_print=False,
+                     Gauss_quad=2, use_photosphere_radius=True,
+                     device="cpu", y_p=np.array([0.0]),
+                     return_albedo=False,
+                     kappa_contributions=(), cloud_properties_contributions=()):
+    """v0 transmission orchestrator.
+
+    Mirrors POSEIDON `core.py:1303-2132` filtered to the transmission /
+    opacity-sampling / cpu / MacMad17 path.
+    """
+    if device != "cpu":
+        raise NotImplementedError(f"device={device!r} (only cpu in v0)")
+    if save_spectrum:
+        raise NotImplementedError("save_spectrum=True (file I/O) is v1")
+    if return_albedo:
+        raise NotImplementedError("return_albedo=True is for emission (v1)")
+    if len(kappa_contributions) or len(cloud_properties_contributions):
+        raise NotImplementedError("contributions.py path is v1")
+
+    disable_atmosphere = model["disable_atmosphere"]
+    if disable_atmosphere:
+        raise NotImplementedError("disable_atmosphere=True (bare-rock) is v1")
+
+    if not check_atmosphere_physical(atmosphere, opac):
+        out = np.empty(len(wl))
+        out[:] = np.nan
+        return out
+
+    if spectrum_type != "transmission":
+        raise NotImplementedError(
+            f"spectrum_type={spectrum_type!r} (only 'transmission' in v0)"
+        )
+    if opac["opacity_treatment"] != "opacity_sampling":
+        raise NotImplementedError(
+            "opacity_treatment='line_by_line' deferred to v1"
+        )
+    if model.get("thermal_scattering") or model.get("reflection"):
+        raise NotImplementedError("thermal_scattering / reflection are v1")
+    if model.get("surface"):
+        raise NotImplementedError("surface models are v1")
+    if "Mie" in model.get("cloud_model", "") or "eddysed" in model.get(
+            "cloud_model", ""):
+        raise NotImplementedError("Mie / eddysed clouds are v1")
+
+    # ----- unpack planet / atmosphere / model (POSEIDON core.py:1404-1466) ---
+    b_p = planet["planet_impact_parameter"]
+    R_s = star["R_s"]
+    P = atmosphere["P"]
+    r = atmosphere["r"]
+    r_low = atmosphere["r_low"]
+    r_up = atmosphere["r_up"]
+    dr = atmosphere["dr"]
+    n = atmosphere["n"]
+    T = atmosphere["T"]
+    X = atmosphere["X"]
+    X_active = atmosphere["X_active"]
+    X_CIA = atmosphere["X_CIA"]
+    X_ff = atmosphere["X_ff"]
+    X_bf = atmosphere["X_bf"]
+    N_sectors = atmosphere["N_sectors"]
+    N_zones = atmosphere["N_zones"]
+    phi_edge = atmosphere["phi_edge"]
+    theta_edge = atmosphere["theta_edge"]
+    a = atmosphere["a"]
+    gamma = atmosphere["gamma"]
+    P_cloud = atmosphere["P_cloud"]
+    kappa_cloud_0 = atmosphere["kappa_cloud_0"]
+    f_cloud = atmosphere["f_cloud"]
+    phi_cloud_0 = atmosphere["phi_cloud_0"]
+    theta_cloud_0 = atmosphere["theta_cloud_0"]
+    P_surf = atmosphere["P_surf"]
+
+    chemical_species = model["chemical_species"]
+    active_species = model["active_species"]
+    CIA_pairs = model["CIA_pairs"]
+    ff_pairs = model["ff_pairs"]
+    bf_species = model["bf_species"]
+
+    enable_haze = 1 if "haze" in model["cloud_type"] else 0
+    enable_deck = (1 if ("deck" in model["cloud_type"]
+                          and "Mie" not in model["cloud_model"]) else 0)
+
+    # ----- POSEIDON `core.py:1651-1683` numba-placeholder n_aerosol / σ_ext --
+    n_aerosol = np.array([np.zeros_like(r)])
+    sigma_ext_cloud = np.array([np.zeros_like(wl)])
+
+    # POSEIDON `core.py:1668-1669`: ensure P_cloud is an array
+    if not isinstance(P_cloud, np.ndarray):
+        P_cloud = np.array([P_cloud])
+
+    sigma_stored = opac["sigma_stored"]
+    CIA_stored = opac["CIA_stored"]
+    Rayleigh_stored = opac["Rayleigh_stored"]
+    ff_stored = opac["ff_stored"]
+    bf_stored = opac["bf_stored"]
+    T_fine = opac["T_fine"]
+    log_P_fine = opac["log_P_fine"]
+
+    # ----- Phase 4: runtime extinction ---------------------------------------
+    kappa_gas, kappa_Ray, kappa_cloud, _kappa_sep = extinction(
+        chemical_species, active_species, CIA_pairs, ff_pairs, bf_species,
+        n, T, P, wl, X, X_active, X_CIA, X_ff, X_bf,
+        a, gamma, P_cloud, kappa_cloud_0,
+        sigma_stored, CIA_stored, Rayleigh_stored, ff_stored, bf_stored,
+        enable_haze, enable_deck, enable_surface=0,
+        N_sectors=N_sectors, N_zones=N_zones,
+        T_fine=T_fine, log_P_fine=log_P_fine, P_surf=P_surf,
+        enable_Mie=0, n_aerosol_array=n_aerosol,
+        sigma_Mie_array=sigma_ext_cloud,
+    )
+
+    # ----- Phase 7: TRIDENT (POSEIDON core.py:1841-1844) ---------------------
+    spectrum = TRIDENT(
+        P=P, r=r, r_up=r_up, r_low=r_low, dr=dr, wl=wl,
+        kappa_clear=(kappa_gas + kappa_Ray),
+        kappa_cloud=kappa_cloud,
+        enable_deck=enable_deck, enable_haze=enable_haze,
+        b_p=b_p, y_p=y_p[0], R_s=R_s,
+        f_cloud=f_cloud, phi_0=phi_cloud_0, theta_0=theta_cloud_0,
+        phi_edge=phi_edge, theta_edge=theta_edge,
+    )
+    return spectrum
