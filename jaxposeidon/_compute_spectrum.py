@@ -88,9 +88,12 @@ def compute_spectrum(
     if disable_atmosphere:
         raise NotImplementedError("disable_atmosphere=True (bare-rock) is v1")
 
-    if spectrum_type != "transmission":
+    if spectrum_type not in ("transmission", "transmission_time_average"):
         raise NotImplementedError(
-            f"spectrum_type={spectrum_type!r} (only 'transmission' in v0)"
+            f"spectrum_type={spectrum_type!r}: only 'transmission' and "
+            "'transmission_time_average' wired; emission / reflection / "
+            "direct / dayside / nightside dispatch is the Phase 0.5.13c "
+            "follow-up."
         )
     if opac["opacity_treatment"] != "opacity_sampling":
         # extinction_LBL orchestrator is the follow-up — the kernel
@@ -232,26 +235,57 @@ def compute_spectrum(
     )
 
     # ----- Phase 7: TRIDENT (POSEIDON core.py:1841-1844) ---------------------
-    spectrum = TRIDENT(
-        P=P,
-        r=r,
-        r_up=r_up,
-        r_low=r_low,
-        dr=dr,
-        wl=wl,
-        kappa_clear=(kappa_gas + kappa_Ray),
-        kappa_cloud=kappa_cloud,
-        enable_deck=enable_deck,
-        enable_haze=enable_haze,
-        b_p=b_p,
-        y_p=y_p[0],
-        R_s=R_s,
-        f_cloud=f_cloud,
-        phi_0=phi_cloud_0,
-        theta_0=theta_cloud_0,
-        phi_edge=phi_edge,
-        theta_edge=theta_edge,
-    )
+    if spectrum_type == "transmission_time_average":
+        N_y = len(y_p)
+        spectrum_stored = np.zeros(shape=(N_y, len(wl)))
+        for i in range(0, (N_y // 2 + 1)):
+            spec_i = TRIDENT(
+                P=P,
+                r=r,
+                r_up=r_up,
+                r_low=r_low,
+                dr=dr,
+                wl=wl,
+                kappa_clear=(kappa_gas + kappa_Ray),
+                kappa_cloud=kappa_cloud,
+                enable_deck=enable_deck,
+                enable_haze=enable_haze,
+                b_p=b_p,
+                y_p=y_p[i],
+                R_s=R_s,
+                f_cloud=f_cloud,
+                phi_0=phi_cloud_0,
+                theta_0=theta_cloud_0,
+                phi_edge=phi_edge,
+                theta_edge=theta_edge,
+            )
+            spectrum_stored[i, :] = spec_i
+            if i != N_y // 2:
+                spectrum_stored[N_y - 1 - i, :] = spec_i
+        spectrum = 0.5 * (
+            np.mean(spectrum_stored[1:-1], axis=0) + np.mean(spectrum_stored, axis=0)
+        )
+    else:
+        spectrum = TRIDENT(
+            P=P,
+            r=r,
+            r_up=r_up,
+            r_low=r_low,
+            dr=dr,
+            wl=wl,
+            kappa_clear=(kappa_gas + kappa_Ray),
+            kappa_cloud=kappa_cloud,
+            enable_deck=enable_deck,
+            enable_haze=enable_haze,
+            b_p=b_p,
+            y_p=y_p[0],
+            R_s=R_s,
+            f_cloud=f_cloud,
+            phi_0=phi_cloud_0,
+            theta_0=theta_cloud_0,
+            phi_edge=phi_edge,
+            theta_edge=theta_edge,
+        )
 
     if save_spectrum:
         from jaxposeidon._output import write_spectrum

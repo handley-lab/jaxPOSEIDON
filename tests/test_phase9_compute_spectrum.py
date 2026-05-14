@@ -136,7 +136,6 @@ def test_compute_spectrum_returns_NaN_for_temperature_out_of_fine_grid():
         "direct_emission",
         "dayside_emission",
         "nightside_emission",
-        "transmission_time_average",
     ],
 )
 def test_compute_spectrum_rejects_non_transmission_types(spectrum_type):
@@ -145,6 +144,39 @@ def test_compute_spectrum_rejects_non_transmission_types(spectrum_type):
         j_compute_spectrum(
             planet, star, model, atmosphere, opac, wl, spectrum_type=spectrum_type
         )
+
+
+def test_compute_spectrum_transmission_time_average_matches_poseidon():
+    """Phase 0.5.13c: transmission_time_average parity vs POSEIDON.
+
+    Drives the y_p loop in compute_spectrum (POSEIDON core.py:1847-1878)
+    via a 5-point planet-impact-parameter time series.
+    """
+    from POSEIDON.core import compute_spectrum as p_compute_spectrum
+
+    planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
+    y_p = np.array([-0.4, -0.2, 0.0, 0.2, 0.4])
+    ours = j_compute_spectrum(
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type="transmission_time_average",
+        y_p=y_p,
+    )
+    theirs = p_compute_spectrum(
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type="transmission_time_average",
+        y_p=y_p,
+    )
+    np.testing.assert_array_equal(ours, theirs)
 
 
 def test_compute_spectrum_rejects_gpu_device():
@@ -158,19 +190,30 @@ def test_compute_spectrum_save_spectrum_matches_poseidon(tmp_path, monkeypatch):
     import os
 
     from POSEIDON.core import compute_spectrum as p_compute_spectrum
+
     planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
     model["model_name"] = "test_model"
     monkeypatch.chdir(tmp_path)
 
     # Both ports write to ./POSEIDON_output/<planet>/spectra/
     os.makedirs(
-        f"POSEIDON_output/{planet['planet_name']}/spectra", exist_ok=True,
+        f"POSEIDON_output/{planet['planet_name']}/spectra",
+        exist_ok=True,
     )
     ours = j_compute_spectrum(
-        planet, star, model, atmosphere, opac, wl, save_spectrum=True,
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        save_spectrum=True,
     )
     ours_file = (
-        tmp_path / "POSEIDON_output" / planet["planet_name"] / "spectra"
+        tmp_path
+        / "POSEIDON_output"
+        / planet["planet_name"]
+        / "spectra"
         / f"{planet['planet_name']}_test_model_spectrum.txt"
     )
     assert ours_file.is_file()
@@ -180,7 +223,13 @@ def test_compute_spectrum_save_spectrum_matches_poseidon(tmp_path, monkeypatch):
     ours_file.rename(ours_file.with_suffix(".jp.txt"))
 
     theirs = p_compute_spectrum(
-        planet, star, model, atmosphere, opac, wl, save_spectrum=True,
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        save_spectrum=True,
     )
     np.testing.assert_array_equal(ours, theirs)
 
@@ -198,12 +247,25 @@ def test_compute_spectrum_disable_continuum_matches_poseidon():
     under opacity_sampling. Test asserts both behaviours.
     """
     from POSEIDON.core import compute_spectrum as p_compute_spectrum
+
     planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
     ours = j_compute_spectrum(
-        planet, star, model, atmosphere, opac, wl, disable_continuum=True,
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        disable_continuum=True,
     )
     theirs = p_compute_spectrum(
-        planet, star, model, atmosphere, opac, wl, disable_continuum=True,
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        disable_continuum=True,
     )
     np.testing.assert_array_equal(ours, theirs)
 
@@ -214,10 +276,22 @@ def test_compute_spectrum_disable_continuum_is_inert_in_opacity_sampling():
     LBL mode honors disable_continuum (POSEIDON absorption.py:1632)."""
     planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
     s_on = j_compute_spectrum(
-        planet, star, model, atmosphere, opac, wl, disable_continuum=False,
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        disable_continuum=False,
     )
     s_off = j_compute_spectrum(
-        planet, star, model, atmosphere, opac, wl, disable_continuum=True,
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        disable_continuum=True,
     )
     np.testing.assert_array_equal(s_on, s_off)
 
