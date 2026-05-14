@@ -596,7 +596,10 @@ def test_loglikelihood_combinatorial_v0_surface_lumped(offsets_applied,
         **{k: v for k, v in lumped_kwargs.items()
             if k not in ("offset_start", "offset_end")},
     )
-    np.testing.assert_allclose(ll, expected, atol=0, rtol=0)
+    # FP-precision: the lumped path's slice-then-subtract loops do not
+    # always reduce in the same order as the hand-replicated reference
+    # (see `[None, three_datasets]` ~1-ULP residual on Python 3.12).
+    np.testing.assert_allclose(ll, expected, atol=1e-12, rtol=1e-12)
 
 
 def test_loglikelihood_NaN_sentinel_overrides_all_extras():
