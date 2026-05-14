@@ -1,18 +1,14 @@
-"""Phase 9d: finite-difference gradient sanity test.
+"""Phase 9d: finite-difference smoothness sanity for the v0 numpy port.
 
-Per the plan: 100 random parameter points, finite-difference
-∂(loglikelihood)/∂θ matches the analytic / autodiff gradient to
-`rtol=1e-4` away from discontinuities.
-
-v0 jaxposeidon is a numpy port (JAX-tracing is v1 work documented in
-Phase 7). For now we sanity-check that the forward model is smooth in
+v0 jaxposeidon is a numpy port (JAX-tracing gated to v1 per Phase 7).
+This module sanity-checks that the forward model is smooth in
 its continuous parameters (T_iso, R_p_ref, P_ref, log_a_haze, γ,
 log_P_cloud, f_cloud) by verifying that small perturbations produce
-small spectrum changes whose first central-difference derivative
-is finite (no NaN / inf away from rejection branches).
+finite central-difference derivatives away from rejection branches.
 
-The actual `jax.grad` vs finite-difference comparison is gated to v1
-once the numpy ports are replaced by JAX-traceable equivalents.
+Full `jax.grad` vs finite-difference parity (100 random points,
+rtol=1e-4) is gated to v1 once the numpy ports are replaced by
+JAX-traceable equivalents.
 """
 
 import os

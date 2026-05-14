@@ -84,7 +84,7 @@ BULKS = [["H2"], ["H2", "He"]]
 @pytest.mark.parametrize("P_ref", P_REF_VALUES)
 @pytest.mark.parametrize("bulk", BULKS, ids=lambda b: "_".join(b))
 def test_compute_spectrum_sweep_matches_poseidon(T_iso, rp_fac, P_ref, bulk):
-    """300-case combinatorial regression (6×5×5×2) vs POSEIDON. Bit-exact."""
+    """300-case combinatorial regression (6×5×5×2) vs POSEIDON. FP-precision (atol=1e-15, rtol=1e-13)."""
     from POSEIDON.constants import R_J
     from POSEIDON.core import compute_spectrum as p_compute_spectrum
     planet, star, model, atmosphere, opac, wl = _build_atm_and_opac(
