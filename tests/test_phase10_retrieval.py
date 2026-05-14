@@ -150,37 +150,42 @@ def _trivial_components():
     return split_params, make_atmosphere, captured
 
 
-@pytest.mark.parametrize("reference_parameter,physical_in", [
-    ("R_p_ref", [7e7]),
-    ("P_ref", [-1.5]),
-    ("R_p_ref+P_ref", [7e7, -1.5]),
+@pytest.mark.parametrize("reference_parameter,prior_ranges,unit_cube,"
+                          "expected_R_p_ref,expected_P_ref", [
+    # cube=0.25 over [6e7, 8e7] → physical = 6.5e7; log_P_ref_fixed=1 → P_ref=10
+    ("R_p_ref",
+     {"R_p_ref": [6.0e7, 8.0e7]}, [0.25], 6.5e7, 10.0),
+    # cube=0.75 over [-3, -1] → physical log_P = -1.5 → P_ref = 10**-1.5
+    ("P_ref",
+     {"log_P_ref": [-3.0, -1.0]}, [0.75], 7.0e7, 10.0 ** -1.5),
+    # cube=[0.25, 0.75] → R_p_ref=6.5e7, log_P_ref=-1.5
+    ("R_p_ref+P_ref",
+     {"R_p_ref": [6.0e7, 8.0e7], "log_P_ref": [-3.0, -1.0]},
+     [0.25, 0.75], 6.5e7, 10.0 ** -1.5),
 ])
-def test_make_loglikelihood_reference_parameter(reference_parameter,
-                                                 physical_in):
+def test_make_loglikelihood_reference_parameter(
+    reference_parameter, prior_ranges, unit_cube,
+    expected_R_p_ref, expected_P_ref,
+):
     sp, ma, captured = _trivial_components()
-    pt = {f"p{i}": "uniform" for i in range(len(physical_in))}
-    pr = {f"p{i}": [-1e9, 1e9] for i in range(len(physical_in))}
+    param_names = list(prior_ranges.keys())
+    prior_types = {p: "uniform" for p in param_names}
     logp = _retrieval.make_loglikelihood(
         planet=object(), star=None, model=None, opac=None,
         wl=np.zeros(1), data_properties={},
         split_params=sp, make_atmosphere=ma,
-        param_names=list(pt.keys()), prior_types=pt, prior_ranges=pr,
+        param_names=param_names, prior_types=prior_types,
+        prior_ranges=prior_ranges,
         P=np.logspace(2, -7, 10),
         reference_parameter=reference_parameter,
-        R_p_ref_fixed=7e7, log_P_ref_fixed=1.0,
+        R_p_ref_fixed=7.0e7, log_P_ref_fixed=1.0,
     )
-    # The driver should propagate StopIteration up; capture the args
-    # before make_atmosphere raises.
     with pytest.raises(StopIteration):
-        logp(np.array([0.5] * len(physical_in)))
-    if reference_parameter == "R_p_ref":
-        assert captured["P_ref"] == 10.0  # 10 ** 1.0
-    elif reference_parameter == "P_ref":
-        assert captured["R_p_ref"] == 7e7
-    else:
-        # Both free — values come from prior transform on cube=[0.5, 0.5]
-        assert captured["R_p_ref"] == 0.0  # midpoint of [-1e9, 1e9]
-        assert captured["P_ref"] == 10.0 ** 0.0
+        logp(np.array(unit_cube))
+    np.testing.assert_allclose(captured["R_p_ref"], expected_R_p_ref,
+                                atol=0, rtol=1e-12)
+    np.testing.assert_allclose(captured["P_ref"], expected_P_ref,
+                                atol=0, rtol=1e-12)
 
 
 def test_make_loglikelihood_rejects_unknown_reference_parameter():
@@ -223,31 +228,37 @@ def test_make_loglikelihood_rejects_missing_fixed_values():
     None, "Line15", "Piette20", "Line15+Piette20",
 ])
 def test_make_loglikelihood_offsets_inflation_combinatorial(
-    offsets_applied, error_inflation,
+    monkeypatch, offsets_applied, error_inflation,
 ):
-    """The closure must forward offsets_applied and error_inflation to
-    _data.loglikelihood. Use an injected atmosphere that returns a fixed
-    spectrum so we can compare against a hand-replicated likelihood."""
+    """The closure must forward offsets_applied / error_inflation /
+    offset_params / err_inflation_params / offset_start / offset_end to
+    _data.loglikelihood. Inject stub compute_spectrum and
+    bin_spectrum_to_data so the test does not depend on POSEIDON
+    opacities, then compare the closure output to an independent
+    loglikelihood call with the same args.
+    """
+    from jaxposeidon import _retrieval as ret_module
     from jaxposeidon._data import loglikelihood
 
     n = 24
     ymodel_target = np.full(n, 2.7e-3)
-    ydata = ymodel_target + np.random.default_rng(0).normal(0, 5e-5, size=n)
+    rng = np.random.default_rng(0)
+    ydata = ymodel_target + rng.normal(0, 5e-5, size=n)
     err_data = np.full(n, 1e-4)
+
     if offsets_applied == "single_dataset":
         offset_params = np.array([50.0])
-        off_kwargs = dict(offset_start=0, offset_end=n)
+        data_off = dict(offset_start=0, offset_end=n)
     elif offsets_applied == "two_datasets":
         offset_params = np.array([50.0, -30.0])
-        off_kwargs = dict(offset_start=[0, n // 2], offset_end=[n // 2, n])
+        data_off = dict(offset_start=[0, n // 2], offset_end=[n // 2, n])
     elif offsets_applied == "three_datasets":
         offset_params = np.array([50.0, -30.0, 20.0])
         t = n // 3
-        off_kwargs = dict(offset_start=[0, t, 2 * t],
-                           offset_end=[t, 2 * t, n])
+        data_off = dict(offset_start=[0, t, 2 * t], offset_end=[t, 2 * t, n])
     else:
         offset_params = np.array([])
-        off_kwargs = dict(offset_start=0, offset_end=0)
+        data_off = dict(offset_start=0, offset_end=0)
     if error_inflation == "Line15":
         err_inflation_params = np.array([-8.5])
     elif error_inflation == "Piette20":
@@ -257,6 +268,48 @@ def test_make_loglikelihood_offsets_inflation_combinatorial(
     else:
         err_inflation_params = np.array([])
 
+    data_properties = dict(
+        ydata=ydata, err_data=err_data,
+        offset_1_start=0, offset_1_end=0,
+        offset_2_start=0, offset_2_end=0,
+        offset_3_start=0, offset_3_end=0,
+        **data_off,
+    )
+
+    def split_params(physical, N_params_cum=None):
+        # physical = [R_p_ref]; pad offset_params/err_inflation_params into rest
+        return (np.array([physical[0]]),  # physical_params
+                np.array([1000.0]),       # PT
+                np.array([]), np.array([]), np.array([]),  # log_X, cloud, geom
+                np.array([]),             # stellar (rest[0])
+                offset_params,            # offsets (rest[1])
+                err_inflation_params,     # err_inflation (rest[2])
+                np.array([]), np.array([]))  # high_res, surface
+
+    def make_atm_stub(*a, **kw):
+        return {"_stub": True}  # never used, compute_spectrum is monkeypatched
+
+    monkeypatch.setattr(ret_module, "compute_spectrum",
+                         lambda *a, **kw: ymodel_target)
+    monkeypatch.setattr(ret_module, "bin_spectrum_to_data",
+                         lambda spectrum, wl, dp: spectrum)
+
+    param_names = ["R_p_ref"]
+    prior_types = {"R_p_ref": "uniform"}
+    prior_ranges = {"R_p_ref": [6.5e7, 7.5e7]}
+    logp = ret_module.make_loglikelihood(
+        planet=None, star=None, model=None, opac=None,
+        wl=np.zeros(n), data_properties=data_properties,
+        split_params=split_params, make_atmosphere=make_atm_stub,
+        param_names=param_names, prior_types=prior_types,
+        prior_ranges=prior_ranges,
+        P=np.logspace(2, -7, 10),
+        reference_parameter="R_p_ref", log_P_ref_fixed=1.0,
+        offsets_applied=offsets_applied,
+        error_inflation=error_inflation,
+    )
+
+    actual = logp(np.array([0.5]))
     expected = loglikelihood(
         ymodel_target, ydata, err_data,
         offset_params=offset_params,
@@ -266,6 +319,6 @@ def test_make_loglikelihood_offsets_inflation_combinatorial(
         offset_1_start=0, offset_1_end=0,
         offset_2_start=0, offset_2_end=0,
         offset_3_start=0, offset_3_end=0,
-        **off_kwargs,
+        **data_off,
     )
-    assert np.isfinite(expected)
+    np.testing.assert_allclose(actual, expected, atol=0, rtol=0)
