@@ -422,7 +422,7 @@ def test_profiles_madhu_rejects_invalid_pressure_ordering():
 
 @pytest.mark.parametrize("kwargs,err_substring", [
     (dict(PT_profile="gradient"), "PT_profile"),
-    (dict(PT_profile="Guillot"), "PT_profile"),
+    (dict(PT_profile="file_read"), "PT_profile"),
     (dict(X_profile="gradient"), "X_profile"),
     (dict(X_profile="chem_eq"), "X_profile"),
     (dict(disable_atmosphere=True), "disable_atmosphere"),

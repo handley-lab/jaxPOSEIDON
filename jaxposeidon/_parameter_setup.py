@@ -22,14 +22,25 @@ import numpy as np
 # ---------------------------------------------------------------------------
 # v0 configuration whitelist
 # ---------------------------------------------------------------------------
-V0_PT_PROFILES = {"isotherm", "Madhu"}
-V0_X_PROFILES = {"isochem"}
-V0_CLOUD_MODELS = {"cloud-free", "MacMad17"}
-V0_CLOUD_TYPES = {"deck", "haze", "deck_haze"}
-V0_CLOUD_DIMS = {1, 2}
-V0_REFERENCE_PARAMETERS = {"R_p_ref", "P_ref", "R_p_ref+P_ref"}
-V0_OFFSETS = {None, "single_dataset", "two_datasets", "three_datasets"}
-V0_ERROR_INFLATIONS = {None, "Line15", "Piette20", "Line15+Piette20"}
+V0_PT_PROFILES = frozenset({"isotherm", "Madhu"})
+V05_PT_PROFILES_1D = frozenset(
+    {
+        "isotherm",
+        "Madhu",
+        "slope",
+        "Pelletier",
+        "Guillot",
+        "Guillot_dayside",
+        "Line",
+    }
+)
+V0_X_PROFILES = frozenset({"isochem"})
+V0_CLOUD_MODELS = frozenset({"cloud-free", "MacMad17"})
+V0_CLOUD_TYPES = frozenset({"deck", "haze", "deck_haze"})
+V0_CLOUD_DIMS = frozenset({1, 2})
+V0_REFERENCE_PARAMETERS = frozenset({"R_p_ref", "P_ref", "R_p_ref+P_ref"})
+V0_OFFSETS = frozenset({None, "single_dataset", "two_datasets", "three_datasets"})
+V0_ERROR_INFLATIONS = frozenset({None, "Line15", "Piette20", "Line15+Piette20"})
 
 
 def assert_v0_model_config(
@@ -97,9 +108,10 @@ def assert_v0_model_config(
         raise Exception("Error: only one of mass or gravity can be a free parameter.")
     if "ghost" in bulk_species:
         raise NotImplementedError("v0 does not support 'ghost' bulk species")
-    if PT_profile not in V0_PT_PROFILES:
+    if PT_profile not in V05_PT_PROFILES_1D:
         raise NotImplementedError(
-            f"PT_profile={PT_profile!r} not in v0 ({sorted(V0_PT_PROFILES)})"
+            f"PT_profile={PT_profile!r} not in v0.5 1D set "
+            f"({sorted(V05_PT_PROFILES_1D)})"
         )
     if X_profile not in V0_X_PROFILES:
         raise NotImplementedError(
@@ -167,13 +179,12 @@ def assert_v0_model_config(
             "sharp_DN_transition / sharp_EM_transition only apply to 2D/3D "
             "atmospheres, which are deferred to v1."
         )
-    # PT_penalty is only meaningful with PT_profile='Pelletier' (deferred);
-    # reject if set regardless so a caller cannot pass an obsolete flag.
-    if PT_penalty:
-        raise NotImplementedError(
-            "PT_penalty only applies to PT_profile='Pelletier', which is "
-            "deferred to v1."
-        )
+    # PT_penalty is only meaningful with PT_profile='Pelletier'; only the
+    # additional sigma_s parameter is appended at this layer. The
+    # Pelletier+penalty *prior* (spline smoothness penalty) is deferred to
+    # Phase 0.5.10.
+    if PT_penalty and PT_profile != "Pelletier":
+        raise NotImplementedError("PT_penalty only applies to PT_profile='Pelletier'.")
     if lognormal_logwidth_free:
         raise NotImplementedError(
             "lognormal_logwidth_free only applies to Mie aerosols, which "
@@ -321,6 +332,31 @@ def assign_free_params(
         PT_params += ["T"]
     elif PT_profile == "Madhu":
         PT_params += ["a1", "a2", "log_P1", "log_P2", "log_P3", "T_ref"]
+    elif PT_profile == "slope":
+        PT_params += ["T_phot_PT"]
+        for i in range(len(log_P_slope_arr)):
+            PT_params += [f"Delta_T_{i + 1}"]
+    elif PT_profile == "Pelletier":
+        if number_P_knots < 3:
+            raise Exception(
+                "number_P_knots must be at least 3. (Captures top, bottom, "
+                "middle pressures in log space)"
+            )
+        for i in range(number_P_knots):
+            PT_params += [f"T_{i + 1}"]
+        if PT_penalty:
+            PT_params += ["sigma_s"]
+    elif PT_profile in ("Guillot", "Guillot_dayside"):
+        PT_params += ["log_kappa_IR", "log_gamma", "T_int", "T_equ"]
+    elif PT_profile == "Line":
+        PT_params += [
+            "log_kappa_IR",
+            "log_gamma",
+            "log_gamma_2",
+            "alpha_Line",
+            "beta_Line",
+            "T_int",
+        ]
     N_PT_params = len(PT_params)
     params += PT_params
 

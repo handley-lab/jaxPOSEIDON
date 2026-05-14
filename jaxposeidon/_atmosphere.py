@@ -1,36 +1,50 @@
-"""Atmosphere column construction for v0.
+"""Atmosphere column construction.
 
-Mirrors the v0 paths through POSEIDON's `atmosphere.py:profiles(...)`
-(`POSEIDON/atmosphere.py:2015-2493`). v0 envelope:
+Mirrors POSEIDON's `atmosphere.py:profiles(...)` (`atmosphere.py:2015-2493`).
 
-- `PT_profile in {'isotherm', 'Madhu'}`, `PT_dim == 1`
+Currently supported envelope:
+- `PT_profile` in {`isotherm`, `Madhu`, `slope`, `Pelletier`, `Guillot`,
+  `Guillot_dayside`, `Line`} with `PT_dim == 1`
 - `X_profile == 'isochem'`, `X_dim == 1`, no per-species gradients
-- `bulk_species` is one of: `['H2']`, `['H2', 'He']`, `['H', 'He']`,
-  or any single non-ghost species. H2+H+He dissociation mixture is
-  deferred.
-- `Atmosphere_dimension == 1` (N_sectors = N_zones = 1)
-- `disable_atmosphere == False`
+- `bulk_species`: `['H2']`, `['H2', 'He']`, `['H', 'He']`, or a single
+  non-ghost species (H2/H/He dissociation mixture deferred to 0.5.7)
+- `Atmosphere_dimension == 1`
 
-Numerical strategy: this port mirrors POSEIDON's algorithms exactly,
-including its float64 numpy + scipy `gaussian_filter1d(sigma=3,
-mode='nearest')` smoothing for the Madhu profile. The smoothing is
-delegated to scipy so we get bit-equivalent output to POSEIDON. A
-JAX-native gaussian smoother is a v1 work item if `jax.grad` through the
-PT parameters is needed.
+Deferred to later phases:
+- `gradient` / `two-gradients` PT profiles (0.5.9 — 2D/3D scaffolding)
+- `file_read` PT/X profiles (0.5.17 — file I/O)
+- non-isochem X_profile, dissociation, mu_back, Na_K (0.5.7)
+- chem_eq grids (0.5.8)
+- N_sectors / N_zones > 1 (0.5.9)
+
+Numerical strategy: bit-equivalent port via float64 numpy and scipy's
+`gaussian_filter1d`, `pchip_interpolate`, `special.expn`. JAX-native
+versions are a v1 work item.
 """
 
 import numpy as np
+import scipy
 import scipy.constants as sc
+from scipy.interpolate import pchip_interpolate
 from scipy.ndimage import gaussian_filter1d
 
+from jaxposeidon._opacity_precompute import prior_index
 from jaxposeidon._species_data import inactive_species as _INACTIVE_SPECIES_LOCAL
 from jaxposeidon._species_data import masses as _masses
 
-# ---------------------------------------------------------------------------
-# v0 envelope check for profiles(...)
-# ---------------------------------------------------------------------------
-_V0_PT_PROFILES = {"isotherm", "Madhu"}
-_V0_X_PROFILES = {"isochem"}
+_V0_PT_PROFILES = frozenset({"isotherm", "Madhu"})
+_V05_PT_PROFILES_1D = frozenset(
+    {
+        "isotherm",
+        "Madhu",
+        "slope",
+        "Pelletier",
+        "Guillot",
+        "Guillot_dayside",
+        "Line",
+    }
+)
+_V0_X_PROFILES = frozenset({"isochem"})
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +115,147 @@ def gauss_conv(arr, sigma=3, axis=0, mode="nearest"):
     return gaussian_filter1d(arr, sigma=sigma, axis=axis, mode=mode)
 
 
+def compute_T_slope(
+    P,
+    T_phot,
+    Delta_T_arr,
+    log_P_phot=0.5,
+    log_P_arr=(-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0),
+):
+    """1D Piette & Madhusudhan (2021) `slope` P-T profile.
+
+    Bit-equivalent port of POSEIDON `atmosphere.py:232-299`. PCHIP
+    interpolation over (log_P_points, T_points).
+    """
+    N_layers = len(P)
+    log_P_arr = np.asarray(log_P_arr)
+    T_points = np.zeros(len(log_P_arr) + 1)
+    log_P_points = np.sort(np.append(log_P_arr, log_P_phot))
+    N_T_points = len(T_points)
+
+    i_phot = prior_index(log_P_phot, log_P_arr, 0)
+
+    for i in range(0, i_phot + 1):
+        if i == 0:
+            T_points[i] = T_phot - np.sum(Delta_T_arr[i_phot::-1])
+        else:
+            T_points[i] = T_phot - np.sum(Delta_T_arr[i_phot : i - 1 : -1])
+
+    T_points[i_phot + 1] = T_phot
+
+    for i in range(i_phot + 2, N_T_points):
+        T_points[i] = T_phot + np.sum(Delta_T_arr[i_phot + 1 : i])
+
+    T = np.zeros(shape=(N_layers, 1, 1))
+    T[:, 0, 0] = pchip_interpolate(log_P_points, T_points, np.log10(P))
+    return T
+
+
+def compute_T_Pelletier(P, T_points):
+    """1D Pelletier (2021) `spline` P-T profile.
+
+    Bit-equivalent port of POSEIDON `atmosphere.py:302-341`. PCHIP
+    interpolation between knots evenly spaced in log-pressure between
+    `min(log10 P)` and `max(log10 P)`.
+    """
+    N_layers = len(P)
+    P_min = np.min(np.log10(P))
+    P_max = np.max(np.log10(P))
+    number_P_knots = len(T_points)
+    log_P_points = np.linspace(P_min, P_max, num=number_P_knots)
+    T = np.zeros(shape=(N_layers, 1, 1))
+    T[:, 0, 0] = pchip_interpolate(log_P_points, T_points, np.log10(P))
+    return T
+
+
+def compute_T_Guillot(P, g, log_kappa_IR, log_gamma, T_int, T_equ):
+    """1D Guillot (2010) terminator (f=0.25) P-T profile.
+
+    Bit-equivalent port of POSEIDON `atmosphere.py:344-402`.
+    """
+    kappa_IR = np.power(10, log_kappa_IR)
+    gamma = np.power(10, log_gamma)
+    tau = ((P * 1e6) * kappa_IR) / g
+    T_irr = T_equ * np.sqrt(2.0)
+    N_layers = len(P)
+    T = np.zeros(shape=(N_layers, 1, 1))
+    T[:, 0, 0] = (
+        0.75 * T_int**4.0 * (2.0 / 3.0 + tau)
+        + 0.75
+        * T_irr**4.0
+        / 4.0
+        * (
+            2.0 / 3.0
+            + 1.0 / gamma / 3.0**0.5
+            + (gamma / 3.0**0.5 - 1.0 / 3.0**0.5 / gamma)
+            * np.exp(-gamma * tau * 3.0**0.5)
+        )
+    ) ** 0.25
+    return T
+
+
+def compute_T_Guillot_dayside(P, g, log_kappa_IR, log_gamma, T_int, T_equ):
+    """1D Guillot (2010) dayside (f=0.5) P-T profile.
+
+    Bit-equivalent port of POSEIDON `atmosphere.py:405-462`.
+    """
+    kappa_IR = np.power(10, log_kappa_IR)
+    gamma = np.power(10, log_gamma)
+    tau = ((P * 1e6) * kappa_IR) / g
+    T_irr = T_equ * np.sqrt(2.0)
+    N_layers = len(P)
+    T = np.zeros(shape=(N_layers, 1, 1))
+    T[:, 0, 0] = (
+        0.75 * T_int**4.0 * (2.0 / 3.0 + tau)
+        + 0.75
+        * T_irr**4.0
+        / 2.0
+        * (
+            2.0 / 3.0
+            + 1.0 / gamma / 3.0**0.5
+            + (gamma / 3.0**0.5 - 1.0 / 3.0**0.5 / gamma)
+            * np.exp(-gamma * tau * 3.0**0.5)
+        )
+    ) ** 0.25
+    return T
+
+
+def compute_T_Line(
+    P, g, T_eq, log_kappa_IR, log_gamma, log_gamma_2, alpha, beta, T_int
+):
+    """1D Line (2013) double-channel P-T profile.
+
+    Bit-equivalent port of POSEIDON `atmosphere.py:465-532` (PLATON
+    `set_from_radiative_solution` form, eqns 13-16 of Line+13).
+    """
+    kappa_IR = np.power(10, log_kappa_IR)
+    gamma = np.power(10, log_gamma)
+    gamma2 = np.power(10, log_gamma_2)
+    T_irr = beta * T_eq
+    tau = ((P * 1e6) * kappa_IR) / g
+    N_layers = len(P)
+    T = np.zeros(shape=(N_layers, 1, 1))
+
+    def incoming(gam):
+        return (
+            3.0
+            / 4
+            * T_irr**4
+            * (
+                2.0 / 3
+                + 2.0 / 3 / gam * (1 + (gam * tau / 2 - 1) * np.exp(-gam * tau))
+                + 2.0 * gam / 3 * (1 - tau**2 / 2) * scipy.special.expn(2, gam * tau)
+            )
+        )
+
+    e1 = incoming(gamma)
+    e2 = incoming(gamma2)
+    T[:, 0, 0] = (
+        3.0 / 4 * T_int**4 * (2.0 / 3 + tau) + (1 - alpha) * e1 + alpha * e2
+    ) ** 0.25
+    return T
+
+
 # ---------------------------------------------------------------------------
 # Mixing-ratio construction (isochem, 1D)
 # ---------------------------------------------------------------------------
@@ -153,8 +308,8 @@ def add_bulk_component(
         X[1, :, :, :] = X_He
     elif {"H2", "H", "He"} <= bulk_set:
         raise NotImplementedError(
-            "H2/H/He dissociation bulk mixture deferred to v1 (POSEIDON "
-            "atmosphere.py:1285-1312)."
+            "H2/H/He dissociation bulk mixture deferred to Phase 0.5.7 "
+            "(POSEIDON atmosphere.py:1285-1312)."
         )
     else:
         if N_bulk_species > 1:
@@ -401,21 +556,22 @@ def profiles(
     mu_back=None,
     disable_atmosphere=False,
 ):
-    """v0 port of POSEIDON `atmosphere.py:profiles(...)` (2015-2493).
+    """Port of POSEIDON `atmosphere.py:profiles(...)` (2015-2493).
 
     Returns the same 13-tuple POSEIDON does:
         (T, n, r, r_up, r_low, dr, mu, X, X_active, X_CIA, X_ff, X_bf, physical)
     where `physical` is True/False indicating whether the configuration
     produced a valid atmosphere.
 
-    v0 envelope (see plan Phase 2):
+    Supported envelope:
       - disable_atmosphere=False
-      - PT_profile in {'isotherm', 'Madhu'} with len(PT_state)==1 or 6
-      - X_profile == 'isochem'
-      - X_dim=1, no species gradients
-      - bulk_species per add_bulk_component v0 set
+      - PT_profile in {`isotherm`, `Madhu`, `slope`, `Pelletier`, `Guillot`,
+        `Guillot_dayside`, `Line`} (1D only)
+      - X_profile == 'isochem', X_dim=1, no species gradients
+      - bulk_species per `add_bulk_component`
       - N_sectors == N_zones == 1
-    Any other configuration raises NotImplementedError.
+    Any other configuration raises NotImplementedError pointing at the
+    phase where it lands.
     """
     if disable_atmosphere:
         raise NotImplementedError("v0 does not support disable_atmosphere=True")
@@ -423,33 +579,35 @@ def profiles(
         raise NotImplementedError(
             f"v0 requires N_sectors=N_zones=1 (got {N_sectors}, {N_zones})"
         )
-    if PT_profile not in _V0_PT_PROFILES:
+    if PT_profile not in _V05_PT_PROFILES_1D:
         raise NotImplementedError(
-            f"PT_profile={PT_profile!r} not in v0 ({sorted(_V0_PT_PROFILES)})"
+            f"PT_profile={PT_profile!r} not in v0.5 1D set "
+            f"({sorted(_V05_PT_PROFILES_1D)})"
         )
     if X_profile not in _V0_X_PROFILES:
         raise NotImplementedError(
             f"X_profile={X_profile!r} not in v0 ({sorted(_V0_X_PROFILES)})"
         )
     if len(species_vert_gradient) > 0:
-        raise NotImplementedError("v0 forbids per-species vertical gradients")
+        raise NotImplementedError(
+            "per-species vertical gradients deferred to Phase 0.5.7"
+        )
     if Na_K_fixed_ratio:
-        raise NotImplementedError("Na_K_fixed_ratio is deferred to v1")
+        raise NotImplementedError("Na_K_fixed_ratio deferred to Phase 0.5.7")
     if mu_back is not None:
-        raise NotImplementedError("ghost-bulk mu_back is deferred to v1")
+        raise NotImplementedError("ghost-bulk mu_back deferred to Phase 0.5.7")
     if T_input is not None or X_input is not None:
-        raise NotImplementedError("file_read PT/X are deferred to v1")
+        raise NotImplementedError("file_read PT/X deferred to Phase 0.5.17")
     if chemistry_grid is not None:
-        raise NotImplementedError("chem_eq grids are deferred to v1")
+        raise NotImplementedError("chem_eq grids deferred to Phase 0.5.8")
 
     if PT_profile == "isotherm":
         if len(PT_state) != 1:
             raise NotImplementedError(
                 "v0 isotherm requires len(PT_state)==1 (no 2D/3D)"
             )
-        T_rough = compute_T_isotherm(P, float(PT_state[0]))
-        T = T_rough
-    else:
+        T = compute_T_isotherm(P, float(PT_state[0]))
+    elif PT_profile == "Madhu":
         if len(PT_state) != 6:
             raise NotImplementedError("v0 Madhu requires PT_dim=1 (len(PT_state)==6)")
         a1, a2, log_P1, log_P2, log_P3, T_set = PT_state
@@ -457,6 +615,30 @@ def profiles(
             return (0,) * 12 + (False,)
         T_rough = compute_T_Madhu(P, a1, a2, log_P1, log_P2, log_P3, T_set, P_param_set)
         T = gauss_conv(T_rough, sigma=3, axis=0, mode="nearest")
+    elif PT_profile == "slope":
+        T_phot = PT_state[0]
+        Delta_T_arr = np.array(PT_state[1:])
+        T_rough = compute_T_slope(
+            P, T_phot, Delta_T_arr, log_P_slope_phot, log_P_slope_arr
+        )
+        smooth_width = round(0.3 / ((np.log10(P[0]) - np.log10(P[-1])) / len(P)))
+        T = gauss_conv(T_rough, sigma=smooth_width, axis=0, mode="nearest")
+    elif PT_profile == "Pelletier":
+        T_points = PT_state[:-1] if PT_penalty else PT_state
+        T = compute_T_Pelletier(P, T_points)
+    elif PT_profile == "Guillot":
+        log_kappa_IR, log_gamma, T_int, T_equ = PT_state
+        T = compute_T_Guillot(P, g_0, log_kappa_IR, log_gamma, T_int, T_equ)
+    elif PT_profile == "Guillot_dayside":
+        log_kappa_IR, log_gamma, T_int, T_equ = PT_state
+        T = compute_T_Guillot_dayside(P, g_0, log_kappa_IR, log_gamma, T_int, T_equ)
+    else:  # PT_profile == "Line"
+        log_kappa_IR, log_gamma, log_gamma_2, alpha_l, beta_l, T_int = PT_state
+        if T_eq is None:
+            raise ValueError("PT_profile='Line' requires T_eq")
+        T = compute_T_Line(
+            P, g_0, T_eq, log_kappa_IR, log_gamma, log_gamma_2, alpha_l, beta_l, T_int
+        )
 
     X_param = compute_X_isochem_1D(P, log_X_state, N_sectors, N_zones, param_species)
 
@@ -484,7 +666,7 @@ def profiles(
     for q in range(N_species):
         sp = included_species[q]
         if sp == "ghost":
-            raise NotImplementedError("ghost bulk species deferred to v1")
+            raise NotImplementedError("ghost bulk species deferred to Phase 0.5.7")
         masses_all[q] = _masses[sp]
     mu = compute_mean_mol_mass(P, X, N_species, N_sectors, N_zones, masses_all)
 
