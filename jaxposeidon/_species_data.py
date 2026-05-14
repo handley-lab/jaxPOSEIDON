@@ -119,3 +119,42 @@ masses = {
 # Species treated as spectrally inactive (no line/cross-section opacity).
 # Mirrors `POSEIDON/supported_chemicals.py:121`.
 inactive_species = np.array(["H2", "He", "H", "e-", "H-", "N2", "ghost"])
+
+
+fastchem_supported_species = np.array(
+    [
+        "H2O",
+        "CO2",
+        "OH",
+        "SO",
+        "C2H2",
+        "C2H4",
+        "H2S",
+        "O2",
+        "O3",
+        "HCN",
+        "NH3",
+        "SiO",
+        "CH4",
+        "CO",
+        "C2",
+        "CaH",
+        "CrH",
+        "FeH",
+        "HCl",
+        "K",
+        "MgH",
+        "N2",
+        "Na",
+        "NO",
+        "NO2",
+        "OCS",
+        "PH3",
+        "SH",
+        "SiH",
+        "SO2",
+        "TiH",
+        "TiO",
+        "VO",
+    ]
+)
