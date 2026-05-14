@@ -63,6 +63,7 @@ def test_load_chemistry_grid_synthetic_fixture(tmp_path, monkeypatch):
 def test_load_chemistry_grid_matches_poseidon(tmp_path, monkeypatch):
     """Parity vs POSEIDON.chemistry.load_chemistry_grid on the same fixture."""
     from POSEIDON.chemistry import load_chemistry_grid as p_load
+
     _synthetic_fastchem_grid(tmp_path)
     monkeypatch.setenv("POSEIDON_input_data", str(tmp_path))
     ours = _fastchem_grid_loader.load_chemistry_grid(["H2O", "CH4"])
@@ -194,15 +195,21 @@ def test_interpolate_log_X_grid_single_string_species_array_equivalence():
         log_Met=0.0,
     )
     out_string = _chemistry.interpolate_log_X_grid(
-        **args, chemical_species="H2O", return_dict=False,
+        **args,
+        chemical_species="H2O",
+        return_dict=False,
     )
     out_array = _chemistry.interpolate_log_X_grid(
-        **args, chemical_species=np.array(["H2O"]), return_dict=False,
+        **args,
+        chemical_species=np.array(["H2O"]),
+        return_dict=False,
     )
     np.testing.assert_array_equal(out_string, out_array[0])
     # return_dict path
     out_dict = _chemistry.interpolate_log_X_grid(
-        **args, chemical_species="H2O", return_dict=True,
+        **args,
+        chemical_species="H2O",
+        return_dict=True,
     )
     assert set(out_dict.keys()) == {"H2O"}
     np.testing.assert_array_equal(out_dict["H2O"], out_string)
