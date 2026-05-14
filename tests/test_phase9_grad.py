@@ -47,21 +47,35 @@ def _synthetic_poseidon_input_data():
 
 def _make_atm(T_iso, R_p_ref_fac, P_ref):
     from POSEIDON.constants import R_Sun, R_J, M_J
-    from POSEIDON.core import (create_star, create_planet, define_model,
-                                make_atmosphere, read_opacities,
-                                wl_grid_constant_R)
+    from POSEIDON.core import (
+        create_star,
+        create_planet,
+        define_model,
+        make_atmosphere,
+        read_opacities,
+        wl_grid_constant_R,
+    )
+
     star = create_star(R_Sun, 5000.0, 4.0, 0.0)
     planet = create_planet("p", R_J, mass=M_J, T_eq=T_iso)
     model = define_model("m", ["H2", "He"], [], PT_profile="isotherm")
     P = np.logspace(np.log10(100.0), np.log10(1.0e-7), 60)
-    atm = make_atmosphere(planet, model, P, P_ref, R_J * R_p_ref_fac,
-                           np.array([T_iso]), np.array([]),
-                           constant_gravity=True)
+    atm = make_atmosphere(
+        planet,
+        model,
+        P,
+        P_ref,
+        R_J * R_p_ref_fac,
+        np.array([T_iso]),
+        np.array([]),
+        constant_gravity=True,
+    )
     wl = wl_grid_constant_R(1.0, 4.0, 800)
     T_fine = np.arange(max(200, T_iso - 200), T_iso + 210, 20)
     log_P_fine = np.arange(-6.0, 2.2, 0.4)
-    opac = read_opacities(model, wl, "opacity_sampling", T_fine, log_P_fine,
-                          testing=True)
+    opac = read_opacities(
+        model, wl, "opacity_sampling", T_fine, log_P_fine, testing=True
+    )
     opac["CIA_stored"] *= 0.0
     return planet, star, model, atm, opac, wl
 

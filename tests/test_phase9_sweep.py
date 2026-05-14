@@ -54,21 +54,35 @@ def _synthetic_poseidon_input_data():
 
 def _build_atm_and_opac(T_iso, R_p_ref, P_ref, bulk):
     from POSEIDON.constants import R_Sun, R_J, M_J
-    from POSEIDON.core import (create_star, create_planet, define_model,
-                                make_atmosphere, read_opacities,
-                                wl_grid_constant_R)
+    from POSEIDON.core import (
+        create_star,
+        create_planet,
+        define_model,
+        make_atmosphere,
+        read_opacities,
+        wl_grid_constant_R,
+    )
+
     star = create_star(R_Sun, 5000.0, 4.0, 0.0)
     planet = create_planet("p", R_J, mass=M_J, T_eq=T_iso)
     model = define_model("m", bulk, [], PT_profile="isotherm")
     P = np.logspace(np.log10(100.0), np.log10(1.0e-7), 60)
-    atmosphere = make_atmosphere(planet, model, P, P_ref, R_p_ref,
-                                  np.array([T_iso]), np.array([]),
-                                  constant_gravity=True)
+    atmosphere = make_atmosphere(
+        planet,
+        model,
+        P,
+        P_ref,
+        R_p_ref,
+        np.array([T_iso]),
+        np.array([]),
+        constant_gravity=True,
+    )
     wl = wl_grid_constant_R(0.5, 5.0, 2000)
     T_fine = np.arange(max(200, T_iso - 200), T_iso + 210, 20)
     log_P_fine = np.arange(-6.0, 2.2, 0.4)
-    opac = read_opacities(model, wl, "opacity_sampling", T_fine, log_P_fine,
-                          testing=True)
+    opac = read_opacities(
+        model, wl, "opacity_sampling", T_fine, log_P_fine, testing=True
+    )
     opac["CIA_stored"] *= 0.0
     return planet, star, model, atmosphere, opac, wl
 
@@ -87,8 +101,12 @@ def test_compute_spectrum_sweep_matches_poseidon(T_iso, rp_fac, P_ref, bulk):
     """300-case combinatorial regression (6×5×5×2) vs POSEIDON. FP-precision (atol=1e-15, rtol=1e-13)."""
     from POSEIDON.constants import R_J
     from POSEIDON.core import compute_spectrum as p_compute_spectrum
+
     planet, star, model, atmosphere, opac, wl = _build_atm_and_opac(
-        T_iso, R_J * rp_fac, P_ref, bulk,
+        T_iso,
+        R_J * rp_fac,
+        P_ref,
+        bulk,
     )
     ours = j_compute_spectrum(planet, star, model, atmosphere, opac, wl)
     theirs = p_compute_spectrum(planet, star, model, atmosphere, opac, wl)
@@ -105,17 +123,30 @@ def test_compute_spectrum_sweep_matches_poseidon(T_iso, rp_fac, P_ref, bulk):
 # pure-deck, pure-haze, deck+haze (cloud_dim=1) and patchy cloud_dim=2
 # configurations. Each through both POSEIDON and jaxposeidon.
 # ---------------------------------------------------------------------------
-def _build_cloud_atm_and_opac(cloud_type, cloud_dim, f_cloud,
-                               log_a_haze, gamma_haze, log_P_cloud):
+def _build_cloud_atm_and_opac(
+    cloud_type, cloud_dim, f_cloud, log_a_haze, gamma_haze, log_P_cloud
+):
     from POSEIDON.constants import R_Sun, R_J, M_J
-    from POSEIDON.core import (create_star, create_planet, define_model,
-                                make_atmosphere, read_opacities,
-                                wl_grid_constant_R)
+    from POSEIDON.core import (
+        create_star,
+        create_planet,
+        define_model,
+        make_atmosphere,
+        read_opacities,
+        wl_grid_constant_R,
+    )
+
     star = create_star(R_Sun, 5000.0, 4.0, 0.0)
     planet = create_planet("p", R_J, mass=M_J, T_eq=1000.0)
-    model = define_model("m", ["H2", "He"], [], PT_profile="isotherm",
-                         cloud_model="MacMad17", cloud_type=cloud_type,
-                         cloud_dim=cloud_dim)
+    model = define_model(
+        "m",
+        ["H2", "He"],
+        [],
+        PT_profile="isotherm",
+        cloud_model="MacMad17",
+        cloud_type=cloud_type,
+        cloud_dim=cloud_dim,
+    )
     P = np.logspace(np.log10(100.0), np.log10(1.0e-7), 60)
     # cloud_params layout per assign_free_params (MacMad17 deck/haze/deck_haze)
     if cloud_dim == 1:
@@ -131,17 +162,24 @@ def _build_cloud_atm_and_opac(cloud_type, cloud_dim, f_cloud,
         elif cloud_type == "haze":
             cloud_params = np.array([log_a_haze, gamma_haze, f_cloud])
         else:
-            cloud_params = np.array([log_a_haze, gamma_haze, log_P_cloud,
-                                      f_cloud])
-    atmosphere = make_atmosphere(planet, model, P, 10.0, R_J,
-                                  np.array([1000.0]), np.array([]),
-                                  cloud_params=cloud_params,
-                                  constant_gravity=True)
+            cloud_params = np.array([log_a_haze, gamma_haze, log_P_cloud, f_cloud])
+    atmosphere = make_atmosphere(
+        planet,
+        model,
+        P,
+        10.0,
+        R_J,
+        np.array([1000.0]),
+        np.array([]),
+        cloud_params=cloud_params,
+        constant_gravity=True,
+    )
     wl = wl_grid_constant_R(0.5, 5.0, 1500)
     T_fine = np.arange(800, 1210, 20)
     log_P_fine = np.arange(-6.0, 2.2, 0.4)
-    opac = read_opacities(model, wl, "opacity_sampling", T_fine, log_P_fine,
-                          testing=True)
+    opac = read_opacities(
+        model, wl, "opacity_sampling", T_fine, log_P_fine, testing=True
+    )
     opac["CIA_stored"] *= 0.0
     return planet, star, model, atmosphere, opac, wl
 
@@ -153,12 +191,23 @@ def _build_cloud_atm_and_opac(cloud_type, cloud_dim, f_cloud,
 @pytest.mark.parametrize("gamma_haze", [-4.0, 0.0])
 @pytest.mark.parametrize("log_P_cloud", [-2.0, 0.0])
 def test_compute_spectrum_cloud_sweep_matches_poseidon(
-    cloud_type, cloud_dim, f_cloud, log_a_haze, gamma_haze, log_P_cloud,
+    cloud_type,
+    cloud_dim,
+    f_cloud,
+    log_a_haze,
+    gamma_haze,
+    log_P_cloud,
 ):
     """MacMad17 cloud/haze sweep — FP-precision POSEIDON parity (atol=1e-15, rtol=1e-13)."""
     from POSEIDON.core import compute_spectrum as p_compute_spectrum
+
     planet, star, model, atmosphere, opac, wl = _build_cloud_atm_and_opac(
-        cloud_type, cloud_dim, f_cloud, log_a_haze, gamma_haze, log_P_cloud,
+        cloud_type,
+        cloud_dim,
+        f_cloud,
+        log_a_haze,
+        gamma_haze,
+        log_P_cloud,
     )
     ours = j_compute_spectrum(planet, star, model, atmosphere, opac, wl)
     theirs = p_compute_spectrum(planet, star, model, atmosphere, opac, wl)

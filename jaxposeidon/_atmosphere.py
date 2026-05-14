@@ -33,7 +33,7 @@ from jaxposeidon._species_data import inactive_species as _INACTIVE_SPECIES_LOCA
 from jaxposeidon._species_data import masses as _masses
 
 _V0_PT_PROFILES = frozenset({"isotherm", "Madhu"})
-_V05_PT_PROFILES_1D = frozenset(
+_V05_PT_PROFILES = frozenset(
     {
         "isotherm",
         "Madhu",
@@ -42,9 +42,22 @@ _V05_PT_PROFILES_1D = frozenset(
         "Guillot",
         "Guillot_dayside",
         "Line",
+        "gradient",
+        "two-gradients",
+        "file_read",
     }
 )
-_V0_X_PROFILES = frozenset({"isochem"})
+_V05_X_PROFILES = frozenset(
+    {
+        "isochem",
+        "gradient",
+        "two-gradients",
+        "dissociation",
+        "lever",
+        "file_read",
+        "chem_eq",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +114,73 @@ def compute_T_Madhu(P, a1, a2, log_P1, log_P2, log_P3, T_set, P_set):
         else:  # log_P[i] <= log_P1
             T[i, 0, 0] = T0 + ((1.0 / a1) * (log_P[i] - log_P_min)) ** 2
 
+    return T
+
+
+def compute_T_Madhu_2D(
+    P,
+    a1_1,
+    a2_1,
+    log_P1_1,
+    log_P2_1,
+    a1_2,
+    a2_2,
+    log_P1_2,
+    log_P2_2,
+    T_deep,
+    P_ref,
+    N_sectors,
+    N_zones,
+    alpha,
+    beta,
+    phi,
+    theta,
+):
+    """2D temperature field from two Madhu profiles sharing deep T at P_ref.
+
+    Bit-equivalent port of POSEIDON `atmosphere.py:106-228`.
+    """
+    N_layers = len(P)
+    log_P3 = np.log10(P_ref)
+
+    T_profile_1 = compute_T_Madhu(
+        P, a1_1, a2_1, log_P1_1, log_P2_1, log_P3, T_deep, P_ref
+    )
+    T_profile_2 = compute_T_Madhu(
+        P, a1_2, a2_2, log_P1_2, log_P2_2, log_P3, T_deep, P_ref
+    )
+    T_1 = T_profile_1[:, 0, 0]
+    T_2 = T_profile_2[:, 0, 0]
+
+    T = np.zeros(shape=(N_layers, N_sectors, N_zones))
+    alpha_rad = alpha * (np.pi / 180.0)
+    beta_rad = beta * (np.pi / 180.0)
+
+    for j in range(N_sectors):
+        for k in range(N_zones):
+            if N_sectors > 1:
+                if phi[j] <= -alpha_rad / 2.0:
+                    w_phi = 1.0
+                elif phi[j] >= alpha_rad / 2.0:
+                    w_phi = 0.0
+                else:
+                    w_phi = 0.5 - (phi[j] / alpha_rad)
+            else:
+                w_phi = 0.5
+
+            if N_zones > 1:
+                if theta[k] <= -beta_rad / 2.0:
+                    w_theta = 1.0
+                elif theta[k] >= beta_rad / 2.0:
+                    w_theta = 0.0
+                else:
+                    w_theta = 0.5 - (theta[k] / beta_rad)
+            else:
+                w_theta = 0.5
+
+            w = max(0.0, min(1.0, w_phi + w_theta - 0.5))
+            for i in range(N_layers):
+                T[i, j, k] = w * T_1[i] + (1.0 - w) * T_2[i]
     return T
 
 
@@ -257,6 +337,455 @@ def compute_T_Line(
 
 
 # ---------------------------------------------------------------------------
+# 3D P-T gradient profiles (MacDonald & Lewis 2022) — `compute_T_field_*`
+# ---------------------------------------------------------------------------
+def compute_T_field_gradient(
+    P,
+    T_bar_term,
+    Delta_T_term,
+    Delta_T_DN,
+    T_deep,
+    N_sectors,
+    N_zones,
+    alpha,
+    beta,
+    phi,
+    theta,
+    P_deep=10.0,
+    P_high=1.0e-5,
+):
+    """3D P-T field gradient (MacDonald & Lewis 2022).
+
+    Bit-equivalent port of POSEIDON `atmosphere.py:536-633`.
+    """
+    N_layers = len(P)
+    T = np.zeros(shape=(N_layers, N_sectors, N_zones))
+    alpha_rad = alpha * (np.pi / 180.0)
+    beta_rad = beta * (np.pi / 180.0)
+    T_Evening = T_bar_term + Delta_T_term / 2.0
+    T_Morning = T_bar_term - Delta_T_term / 2.0
+
+    for j in range(N_sectors):
+        if phi[j] <= -alpha_rad / 2.0:
+            T_term = T_Evening
+        elif (phi[j] > -alpha_rad / 2.0) and (phi[j] < alpha_rad / 2.0):
+            T_term = T_bar_term - (phi[j] / (alpha_rad / 2.0)) * (Delta_T_term / 2.0)
+        elif phi[j] >= -alpha_rad / 2.0:
+            T_term = T_Morning
+
+        T_Day = T_term + Delta_T_DN / 2.0
+        T_Night = T_term - Delta_T_DN / 2.0
+
+        for k in range(N_zones):
+            if theta[k] <= -beta_rad / 2.0:
+                T_high = T_Day
+            elif (theta[k] > -beta_rad / 2.0) and (theta[k] < beta_rad / 2.0):
+                T_high = T_term - (theta[k] / (beta_rad / 2.0)) * (Delta_T_DN / 2.0)
+            elif theta[k] >= -beta_rad / 2.0:
+                T_high = T_Night
+
+            dT_dlogP = (T_deep - T_high) / (np.log10(P_deep / P_high))
+
+            for i in range(N_layers):
+                if P[i] <= P_high:
+                    T[i, j, k] = T_high
+                elif (P[i] > P_high) and (P[i] < P_deep):
+                    T[i, j, k] = T_high + dT_dlogP * np.log10(P[i] / P_high)
+                elif P[i] >= P_deep:
+                    T[i, j, k] = T_deep
+    return T
+
+
+def compute_T_field_two_gradients(
+    P,
+    T_bar_term_high,
+    T_bar_term_mid,
+    Delta_T_term_high,
+    Delta_T_term_mid,
+    Delta_T_DN_high,
+    Delta_T_DN_mid,
+    log_P_mid,
+    T_deep,
+    N_sectors,
+    N_zones,
+    alpha,
+    beta,
+    phi,
+    theta,
+    P_deep=10.0,
+    P_high=1.0e-5,
+):
+    """3D P-T field with two pressure-gradients connected at P_mid.
+
+    Bit-equivalent port of POSEIDON `atmosphere.py:637-755`.
+    """
+    N_layers = len(P)
+    T = np.zeros(shape=(N_layers, N_sectors, N_zones))
+    alpha_rad = alpha * (np.pi / 180.0)
+    beta_rad = beta * (np.pi / 180.0)
+    T_Evening_high = T_bar_term_high + Delta_T_term_high / 2.0
+    T_Evening_mid = T_bar_term_mid + Delta_T_term_mid / 2.0
+    T_Morning_high = T_bar_term_high - Delta_T_term_high / 2.0
+    T_Morning_mid = T_bar_term_mid - Delta_T_term_mid / 2.0
+    P_mid = np.power(10.0, log_P_mid)
+
+    for j in range(N_sectors):
+        if phi[j] <= -alpha_rad / 2.0:
+            T_term_high = T_Evening_high
+            T_term_mid = T_Evening_mid
+        elif (phi[j] > -alpha_rad / 2.0) and (phi[j] < alpha_rad / 2.0):
+            T_term_high = T_bar_term_high - (phi[j] / (alpha_rad / 2.0)) * (
+                Delta_T_term_high / 2.0
+            )
+            T_term_mid = T_bar_term_mid - (phi[j] / (alpha_rad / 2.0)) * (
+                Delta_T_term_mid / 2.0
+            )
+        elif phi[j] >= -alpha_rad / 2.0:
+            T_term_high = T_Morning_high
+            T_term_mid = T_Morning_mid
+
+        T_Day_high = T_term_high + Delta_T_DN_high / 2.0
+        T_Day_mid = T_term_mid + Delta_T_DN_mid / 2.0
+        T_Night_high = T_term_high - Delta_T_DN_high / 2.0
+        T_Night_mid = T_term_mid - Delta_T_DN_mid / 2.0
+
+        for k in range(N_zones):
+            if theta[k] <= -beta_rad / 2.0:
+                T_high = T_Day_high
+                T_mid = T_Day_mid
+            elif (theta[k] > -beta_rad / 2.0) and (theta[k] < beta_rad / 2.0):
+                T_high = T_term_high - (theta[k] / (beta_rad / 2.0)) * (
+                    Delta_T_DN_high / 2.0
+                )
+                T_mid = T_term_mid - (theta[k] / (beta_rad / 2.0)) * (
+                    Delta_T_DN_mid / 2.0
+                )
+            elif theta[k] >= -beta_rad / 2.0:
+                T_high = T_Night_high
+                T_mid = T_Night_mid
+
+            dT_dlogP_1 = (T_mid - T_high) / (np.log10(P_mid / P_high))
+            dT_dlogP_2 = (T_deep - T_mid) / (np.log10(P_deep / P_mid))
+
+            for i in range(N_layers):
+                if P[i] <= P_high:
+                    T[i, j, k] = T_high
+                elif (P[i] > P_high) and (P[i] < P_mid):
+                    T[i, j, k] = T_high + dT_dlogP_1 * np.log10(P[i] / P_high)
+                elif (P[i] >= P_mid) and (P[i] < P_deep):
+                    T[i, j, k] = T_mid + dT_dlogP_2 * np.log10(P[i] / P_mid)
+                elif P[i] >= P_deep:
+                    T[i, j, k] = T_deep
+    return T
+
+
+# ---------------------------------------------------------------------------
+# 3D X-field gradient profiles (MacDonald & Lewis 2022)
+# ---------------------------------------------------------------------------
+def compute_X_field_gradient(
+    P,
+    log_X_state,
+    N_sectors,
+    N_zones,
+    param_species,
+    species_has_profile,
+    alpha,
+    beta,
+    phi,
+    theta,
+    P_deep=10.0,
+    P_high=1.0e-5,
+):
+    """3D abundance field with single pressure gradient.
+
+    Bit-equivalent port of POSEIDON `atmosphere.py:759-878`.
+    """
+    N_layers = len(P)
+    N_param_species = len(param_species)
+    X_profiles = np.zeros(shape=(N_param_species, N_layers, N_sectors, N_zones))
+    alpha_rad = alpha * (np.pi / 180.0)
+    beta_rad = beta * (np.pi / 180.0)
+
+    for q in range(N_param_species):
+        log_X_bar_term, Delta_log_X_term, Delta_log_X_DN, log_X_deep = log_X_state[q, :]
+        X_bar_term = np.power(10.0, log_X_bar_term)
+        X_deep = np.power(10.0, log_X_deep)
+        X_Evening = X_bar_term * np.power(10.0, Delta_log_X_term / 2.0)
+        X_Morning = X_bar_term * np.power(10.0, -Delta_log_X_term / 2.0)
+
+        for j in range(N_sectors):
+            if phi[j] <= -alpha_rad / 2.0:
+                X_term = X_Evening
+            elif (phi[j] > -alpha_rad / 2.0) and (phi[j] < alpha_rad / 2.0):
+                X_term = X_bar_term * np.power(
+                    10.0, -(phi[j] / (alpha_rad / 2.0)) * (Delta_log_X_term / 2.0)
+                )
+            elif phi[j] >= -alpha_rad / 2.0:
+                X_term = X_Morning
+
+            X_Day = X_term * np.power(10.0, Delta_log_X_DN / 2.0)
+            X_Night = X_term * np.power(10.0, -Delta_log_X_DN / 2.0)
+
+            for k in range(N_zones):
+                if theta[k] <= -beta_rad / 2.0:
+                    X_high = X_Day
+                elif (theta[k] > -beta_rad / 2.0) and (theta[k] < beta_rad / 2.0):
+                    X_high = X_term * np.power(
+                        10.0, -(theta[k] / (beta_rad / 2.0)) * (Delta_log_X_DN / 2.0)
+                    )
+                elif theta[k] >= -beta_rad / 2.0:
+                    X_high = X_Night
+
+                if species_has_profile[q] == 1:
+                    dlog_X_dlogP = np.log10(X_deep / X_high) / np.log10(P_deep / P_high)
+                    for i in range(N_layers):
+                        if P[i] <= P_high:
+                            X_profiles[q, i, j, k] = X_high
+                        elif (P[i] > P_high) and (P[i] < P_deep):
+                            X_profiles[q, i, j, k] = X_high * np.power(
+                                P[i] / P_high, dlog_X_dlogP
+                            )
+                        elif P[i] >= P_deep:
+                            X_profiles[q, i, j, k] = X_deep
+                else:
+                    X_profiles[q, :, j, k] = X_high
+    return X_profiles
+
+
+def compute_X_field_two_gradients(
+    P,
+    log_X_state,
+    N_sectors,
+    N_zones,
+    param_species,
+    species_has_profile,
+    alpha,
+    beta,
+    phi,
+    theta,
+    P_deep=10.0,
+    P_high=1.0e-5,
+):
+    """3D abundance field with two pressure gradients.
+
+    Bit-equivalent port of POSEIDON `atmosphere.py:882-1013`.
+    """
+    N_layers = len(P)
+    N_param_species = len(param_species)
+    X_profiles = np.zeros(shape=(N_param_species, N_layers, N_sectors, N_zones))
+    alpha_rad = alpha * (np.pi / 180.0)
+    beta_rad = beta * (np.pi / 180.0)
+
+    for q in range(N_param_species):
+        (
+            log_X_bar_term_high,
+            log_X_bar_term_mid,
+            Delta_log_X_term_high,
+            Delta_log_X_term_mid,
+            Delta_log_X_DN_high,
+            Delta_log_X_DN_mid,
+            log_P_X_mid,
+            log_X_deep,
+        ) = log_X_state[q, :]
+        X_bar_term_high = np.power(10.0, log_X_bar_term_high)
+        X_bar_term_mid = np.power(10.0, log_X_bar_term_mid)
+        P_mid = np.power(10.0, log_P_X_mid)
+        X_deep = np.power(10.0, log_X_deep)
+
+        X_Evening_high = X_bar_term_high * np.power(10.0, Delta_log_X_term_high / 2.0)
+        X_Evening_mid = X_bar_term_mid * np.power(10.0, Delta_log_X_term_mid / 2.0)
+        X_Morning_high = X_bar_term_high * np.power(10.0, -Delta_log_X_term_high / 2.0)
+        X_Morning_mid = X_bar_term_mid * np.power(10.0, -Delta_log_X_term_mid / 2.0)
+
+        for j in range(N_sectors):
+            if phi[j] <= -alpha_rad / 2.0:
+                X_term_high = X_Evening_high
+                X_term_mid = X_Evening_mid
+            elif (phi[j] > -alpha_rad / 2.0) and (phi[j] < alpha_rad / 2.0):
+                X_term_high = X_bar_term_high * np.power(
+                    10.0, -(phi[j] / (alpha_rad / 2.0)) * (Delta_log_X_term_high / 2.0)
+                )
+                X_term_mid = X_bar_term_mid * np.power(
+                    10.0, -(phi[j] / (alpha_rad / 2.0)) * (Delta_log_X_term_mid / 2.0)
+                )
+            elif phi[j] >= -alpha_rad / 2.0:
+                X_term_high = X_Morning_high
+                X_term_mid = X_Morning_mid
+
+            X_Day_high = X_term_high * np.power(10.0, Delta_log_X_DN_high / 2.0)
+            X_Day_mid = X_term_mid * np.power(10.0, Delta_log_X_DN_mid / 2.0)
+            X_Night_high = X_term_high * np.power(10.0, -Delta_log_X_DN_high / 2.0)
+            X_Night_mid = X_term_mid * np.power(10.0, -Delta_log_X_DN_mid / 2.0)
+
+            for k in range(N_zones):
+                if theta[k] <= -beta_rad / 2.0:
+                    X_high = X_Day_high
+                    X_mid = X_Day_mid
+                elif (theta[k] > -beta_rad / 2.0) and (theta[k] < beta_rad / 2.0):
+                    X_high = X_term_high * np.power(
+                        10.0,
+                        -(theta[k] / (beta_rad / 2.0)) * (Delta_log_X_DN_high / 2.0),
+                    )
+                    X_mid = X_term_mid * np.power(
+                        10.0,
+                        -(theta[k] / (beta_rad / 2.0)) * (Delta_log_X_DN_mid / 2.0),
+                    )
+                elif theta[k] >= -beta_rad / 2.0:
+                    X_high = X_Night_high
+                    X_mid = X_Night_mid
+
+                if species_has_profile[q] == 1:
+                    dlog_X_dlogP_1 = np.log10(X_mid / X_high) / np.log10(P_mid / P_high)
+                    dlog_X_dlogP_2 = np.log10(X_deep / X_mid) / np.log10(P_deep / P_mid)
+                    for i in range(N_layers):
+                        if P[i] <= P_high:
+                            X_profiles[q, i, j, k] = X_high
+                        elif (P[i] > P_high) and (P[i] < P_mid):
+                            X_profiles[q, i, j, k] = X_high * np.power(
+                                P[i] / P_high, dlog_X_dlogP_1
+                            )
+                        elif (P[i] >= P_mid) and (P[i] < P_deep):
+                            X_profiles[q, i, j, k] = X_mid * np.power(
+                                P[i] / P_mid, dlog_X_dlogP_2
+                            )
+                        elif P[i] >= P_deep:
+                            X_profiles[q, i, j, k] = X_deep
+                else:
+                    X_profiles[q, :, j, k] = X_high
+    return X_profiles
+
+
+# ---------------------------------------------------------------------------
+# Parmentier 2018 thermal dissociation
+# ---------------------------------------------------------------------------
+_PARMENTIER_COEFFICIENTS = {
+    "H2": (1.0, 2.41e4, 6.5, 10**-0.1),
+    "H2O": (2.0, 4.83e4, 15.9, 10**-3.3),
+    "TiO": (1.6, 5.94e4, 23.0, 10**-7.1),
+    "VO": (1.5, 5.40e4, 23.8, 10**-9.2),
+    "H-": (0.6, -0.14e4, 7.7, 10**-8.3),
+    "Na": (0.6, 1.89e4, 12.2, 10**-5.5),
+    "K": (0.6, 1.28e4, 12.7, 10**-7.1),
+}
+
+
+def Parmentier_dissociation_profile(P, T, A_0, alpha, beta, gamma, A_0_ref):
+    """Parmentier+18 thermal-dissociation abundance profile.
+
+    Bit-equivalent port of POSEIDON `atmosphere.py:1017-1052`.
+    """
+    log_A_shift = np.log10(A_0 / A_0_ref)
+    A_d = (
+        10 ** (log_A_shift - gamma)
+        * P.astype("float64") ** alpha
+        * 10 ** (beta / T.astype("float64"))
+    )
+    return ((1 / A_0) ** 0.5 + (1 / A_d) ** 0.5) ** (-2)
+
+
+def compute_X_dissociation(
+    P,
+    T,
+    log_X_state,
+    N_sectors,
+    N_zones,
+    param_species,
+    species_has_profile,
+    alpha,
+    beta,
+    phi,
+    theta,
+):
+    """3D abundance field with Parmentier+18 thermal dissociation.
+
+    Bit-equivalent port of POSEIDON `atmosphere.py:1056-1166`. Per-species
+    Parmentier coefficients in `_PARMENTIER_COEFFICIENTS`.
+    """
+    N_layers = len(P)
+    N_param_species = len(param_species)
+    X_profiles = np.zeros(shape=(N_param_species, N_layers, N_sectors, N_zones))
+    alpha_rad = alpha * (np.pi / 180.0)
+    beta_rad = beta * (np.pi / 180.0)
+
+    dissoc_species = ("H2O", "TiO", "VO", "H-", "Na", "K")
+
+    for q in range(N_param_species):
+        log_X_bar_term, Delta_log_X_term, Delta_log_X_DN = log_X_state[q, :]
+        X_bar_term = np.power(10.0, log_X_bar_term)
+        X_Evening = X_bar_term * np.power(10.0, Delta_log_X_term / 2.0)
+        X_Morning = X_bar_term * np.power(10.0, -Delta_log_X_term / 2.0)
+
+        for j in range(N_sectors):
+            if phi[j] <= -alpha_rad / 2.0:
+                X_term = X_Evening
+            elif (phi[j] > -alpha_rad / 2.0) and (phi[j] < alpha_rad / 2.0):
+                X_term = X_bar_term * np.power(
+                    10.0, -(phi[j] / (alpha_rad / 2.0)) * (Delta_log_X_term / 2.0)
+                )
+            elif phi[j] >= -alpha_rad / 2.0:
+                X_term = X_Morning
+
+            X_Day = X_term * np.power(10.0, Delta_log_X_DN / 2.0)
+            X_Night = X_term * np.power(10.0, -Delta_log_X_DN / 2.0)
+
+            for k in range(N_zones):
+                if theta[k] <= -beta_rad / 2.0:
+                    X_deep = X_Day
+                elif (theta[k] > -beta_rad / 2.0) and (theta[k] < beta_rad / 2.0):
+                    X_deep = X_term * np.power(
+                        10.0, -(theta[k] / (beta_rad / 2.0)) * (Delta_log_X_DN / 2.0)
+                    )
+                elif theta[k] >= -beta_rad / 2.0:
+                    X_deep = X_Night
+
+                if species_has_profile[q] == 1:
+                    if param_species[q] in dissoc_species:
+                        a_P, b_P, g_P, A0_ref_P = _PARMENTIER_COEFFICIENTS[
+                            param_species[q]
+                        ]
+                        X_profiles[q, :, j, k] = Parmentier_dissociation_profile(
+                            P, T[:, j, k], X_deep, a_P, b_P, g_P, A0_ref_P
+                        )
+                    else:
+                        X_profiles[q, :, j, k] = X_deep
+                else:
+                    X_profiles[q, :, j, k] = X_deep
+    return X_profiles
+
+
+def compute_X_lever(P, log_X_state, species_has_profile, N_sectors, N_zones):
+    """Lever-arm vertical mixing-ratio profile (1D only).
+
+    Bit-equivalent port of POSEIDON `atmosphere.py:1169-1219`.
+    """
+    log_p = np.log10(P)
+    N_param_species = np.shape(log_X_state)[0]
+    log_X = np.zeros(shape=(N_param_species, len(P), N_sectors, N_zones))
+
+    for q in range(N_param_species):
+        log_X_q, log_P_q, upsilon_q = log_X_state[q, :]
+        upsilon_q = upsilon_q * (np.pi / 180.0)
+
+        if np.abs(upsilon_q) <= np.pi / 2:
+            for j in range(len(log_p)):
+                if log_p[j] <= log_P_q:
+                    log_X[q, j, 0, 0] = log_X_q + np.tan(upsilon_q) * (
+                        log_p[j] - log_P_q
+                    )
+                elif log_p[j] > log_P_q:
+                    log_X[q, j, 0, 0] = log_X_q
+        elif (np.abs(upsilon_q) > np.pi / 2) and (np.abs(upsilon_q) <= np.pi):
+            for j in range(len(log_p)):
+                if log_p[j] > log_P_q:
+                    log_X[q, j, 0, 0] = log_X_q + np.tan(upsilon_q) * (
+                        log_p[j] - log_P_q
+                    )
+                elif log_p[j] <= log_P_q:
+                    log_X[q, j, 0, 0] = log_X_q
+    return np.power(10, log_X)
+
+
+# ---------------------------------------------------------------------------
 # Mixing-ratio construction (isochem, 1D)
 # ---------------------------------------------------------------------------
 def compute_X_isochem_1D(P, log_X_state, N_sectors, N_zones, param_species):
@@ -307,10 +836,21 @@ def add_bulk_component(
         X[0, :, :, :] = X_H
         X[1, :, :, :] = X_He
     elif {"H2", "H", "He"} <= bulk_set:
-        raise NotImplementedError(
-            "H2/H/He dissociation bulk mixture deferred to Phase 0.5.7 "
-            "(POSEIDON atmosphere.py:1285-1312)."
-        )
+        X_bulk = 1.0 - np.sum(X_param, axis=0)
+        X_H2_deep = X_bulk / (1.0 + He_fraction)
+        a_P, b_P, g_P, A0_ref_P = _PARMENTIER_COEFFICIENTS["H2"]
+        for j in range(N_sectors):
+            for k in range(N_zones):
+                X_H2 = Parmentier_dissociation_profile(
+                    P, T[:, j, k], X_H2_deep[:, j, k], a_P, b_P, g_P, A0_ref_P
+                )
+                X_H = (X_bulk[:, j, k] - (1 + He_fraction) * X_H2) / (
+                    1 + He_fraction / 2.0
+                )
+                X_He = (He_fraction * X_H2) + ((He_fraction / 2.0) * X_H)
+                X[0, :, j, k] = X_H2
+                X[1, :, j, k] = X_H
+                X[2, :, j, k] = X_He
     else:
         if N_bulk_species > 1:
             raise Exception(
@@ -327,9 +867,15 @@ def add_bulk_component(
 # Mean molecular mass
 # ---------------------------------------------------------------------------
 def compute_mean_mol_mass(P, X, N_species, N_sectors, N_zones, masses_all):
-    """Mean molecular mass profile in kg, per POSEIDON.atmosphere.compute_mean_mol_mass
-    (`POSEIDON/atmosphere.py:1816-1856`)."""
+    """Mean molecular mass profile in kg.
+
+    Mirrors POSEIDON `atmosphere.py:1816-1856`. Same numba-broadcast
+    workaround as `radial_profiles` when X is shaped (N, len(P), 1, 1)
+    while caller requests N_sectors > 1 or N_zones > 1.
+    """
     N_layers = len(P)
+    if X.shape != (N_species, N_layers, N_sectors, N_zones):
+        X = np.broadcast_to(X, (N_species, N_layers, N_sectors, N_zones))
     mu = np.zeros(shape=(N_layers, N_sectors, N_zones))
     for i in range(N_layers):
         for j in range(N_sectors):
@@ -347,8 +893,16 @@ def radial_profiles(P, T, g_0, R_p, P_ref, R_p_ref, mu, N_sectors, N_zones):
 
     Mirrors `POSEIDON/atmosphere.py:1494-1606` (analytic trapezoidal
     integral with 1/(1/r_0 + ∫H dlnP) form, NOT iterative).
+
+    POSEIDON's @jit numba broadcasts size-1 axes silently on `T[:, j, k]`;
+    numpy does not. To match parity, broadcast T to the full sector/zone
+    grid when caller supplies a 1D PT field.
     """
     N_layers = len(P)
+    if T.shape != (N_layers, N_sectors, N_zones):
+        T = np.broadcast_to(T, (N_layers, N_sectors, N_zones))
+    if mu.shape != (N_layers, N_sectors, N_zones):
+        mu = np.broadcast_to(mu, (N_layers, N_sectors, N_zones))
     r = np.zeros((N_layers, N_sectors, N_zones))
     r_up = np.zeros((N_layers, N_sectors, N_zones))
     r_low = np.zeros((N_layers, N_sectors, N_zones))
@@ -433,6 +987,9 @@ def mixing_ratio_categories(
     included = np.asarray(included_species)
     inactive_mask = np.isin(included, _INACTIVE_SPECIES)
 
+    if X.shape[2:] != (N_sectors, N_zones):
+        X = np.broadcast_to(X, (X.shape[0], N_layers, N_sectors, N_zones))
+
     X_active = X[~inactive_mask, :, :, :]
     X_CIA = np.zeros((2, N_CIA_pairs, N_layers, N_sectors, N_zones))
     X_ff = np.zeros((2, N_ff_pairs, N_layers, N_sectors, N_zones))
@@ -461,10 +1018,14 @@ def mixing_ratio_categories(
 def radial_profiles_constant_g(P, T, g_0, P_ref, R_p_ref, mu, N_sectors, N_zones):
     """Constant-gravity hydrostatic radius profile.
 
-    Mirrors `POSEIDON/atmosphere.py:1609-1722`. Used by
-    test_TRIDENT.py::test_Rayleigh (`constant_gravity=True`).
+    Mirrors `POSEIDON/atmosphere.py:1609-1722`. Same numba-broadcast
+    workaround as `radial_profiles` (see its docstring).
     """
     N_layers = len(P)
+    if T.shape != (N_layers, N_sectors, N_zones):
+        T = np.broadcast_to(T, (N_layers, N_sectors, N_zones))
+    if mu.shape != (N_layers, N_sectors, N_zones):
+        mu = np.broadcast_to(mu, (N_layers, N_sectors, N_zones))
     r = np.zeros((N_layers, N_sectors, N_zones))
     r_up = np.zeros((N_layers, N_sectors, N_zones))
     r_low = np.zeros((N_layers, N_sectors, N_zones))
@@ -574,46 +1135,117 @@ def profiles(
     phase where it lands.
     """
     if disable_atmosphere:
-        raise NotImplementedError("v0 does not support disable_atmosphere=True")
-    if N_sectors != 1 or N_zones != 1:
+        raise NotImplementedError("disable_atmosphere=True deferred to Phase 0.5.13d")
+    if PT_profile not in _V05_PT_PROFILES:
         raise NotImplementedError(
-            f"v0 requires N_sectors=N_zones=1 (got {N_sectors}, {N_zones})"
+            f"PT_profile={PT_profile!r} not in v0.5 set ({sorted(_V05_PT_PROFILES)})"
         )
-    if PT_profile not in _V05_PT_PROFILES_1D:
+    if X_profile not in _V05_X_PROFILES:
         raise NotImplementedError(
-            f"PT_profile={PT_profile!r} not in v0.5 1D set "
-            f"({sorted(_V05_PT_PROFILES_1D)})"
+            f"X_profile={X_profile!r} not in v0.5 set ({sorted(_V05_X_PROFILES)})"
         )
-    if X_profile not in _V0_X_PROFILES:
-        raise NotImplementedError(
-            f"X_profile={X_profile!r} not in v0 ({sorted(_V0_X_PROFILES)})"
-        )
-    if len(species_vert_gradient) > 0:
-        raise NotImplementedError(
-            "per-species vertical gradients deferred to Phase 0.5.7"
-        )
-    if Na_K_fixed_ratio:
-        raise NotImplementedError("Na_K_fixed_ratio deferred to Phase 0.5.7")
-    if mu_back is not None:
-        raise NotImplementedError("ghost-bulk mu_back deferred to Phase 0.5.7")
-    if T_input is not None or X_input is not None:
-        raise NotImplementedError("file_read PT/X deferred to Phase 0.5.17")
-    if chemistry_grid is not None:
-        raise NotImplementedError("chem_eq grids deferred to Phase 0.5.8")
+    if X_profile == "chem_eq" and chemistry_grid is None:
+        raise Exception("Error: no chemistry grid loaded for an equilibrium model")
 
     if PT_profile == "isotherm":
-        if len(PT_state) != 1:
-            raise NotImplementedError(
-                "v0 isotherm requires len(PT_state)==1 (no 2D/3D)"
-            )
         T = compute_T_isotherm(P, float(PT_state[0]))
-    elif PT_profile == "Madhu":
-        if len(PT_state) != 6:
-            raise NotImplementedError("v0 Madhu requires PT_dim=1 (len(PT_state)==6)")
-        a1, a2, log_P1, log_P2, log_P3, T_set = PT_state
-        if (log_P3 < log_P2) or (log_P3 < log_P1):
+    elif PT_profile == "gradient":
+        T_bar_term, Delta_T_term, Delta_T_DN, T_deep = PT_state
+        if (Delta_T_term < 0.0) or (Delta_T_DN < 0.0):
             return (0,) * 12 + (False,)
-        T_rough = compute_T_Madhu(P, a1, a2, log_P1, log_P2, log_P3, T_set, P_param_set)
+        T_rough = compute_T_field_gradient(
+            P,
+            T_bar_term,
+            Delta_T_term,
+            Delta_T_DN,
+            T_deep,
+            N_sectors,
+            N_zones,
+            alpha,
+            beta,
+            phi,
+            theta,
+        )
+        T = gauss_conv(T_rough, sigma=3, axis=0, mode="nearest")
+    elif PT_profile == "two-gradients":
+        (
+            T_bar_term_high,
+            T_bar_term_mid,
+            Delta_T_term_high,
+            Delta_T_term_mid,
+            Delta_T_DN_high,
+            Delta_T_DN_mid,
+            log_P_mid,
+            T_deep,
+        ) = PT_state
+        if (
+            (Delta_T_term_high < 0.0)
+            or (Delta_T_DN_high < 0.0)
+            or (Delta_T_term_mid < 0.0)
+            or (Delta_T_DN_mid < 0.0)
+        ):
+            return (0,) * 12 + (False,)
+        T_rough = compute_T_field_two_gradients(
+            P,
+            T_bar_term_high,
+            T_bar_term_mid,
+            Delta_T_term_high,
+            Delta_T_term_mid,
+            Delta_T_DN_high,
+            Delta_T_DN_mid,
+            log_P_mid,
+            T_deep,
+            N_sectors,
+            N_zones,
+            alpha,
+            beta,
+            phi,
+            theta,
+        )
+        T = gauss_conv(T_rough, sigma=3, axis=0, mode="nearest")
+    elif PT_profile == "Madhu":
+        if len(PT_state) == 6:
+            a1, a2, log_P1, log_P2, log_P3, T_set = PT_state
+            if (log_P3 < log_P2) or (log_P3 < log_P1):
+                return (0,) * 12 + (False,)
+            T_rough = compute_T_Madhu(
+                P, a1, a2, log_P1, log_P2, log_P3, T_set, P_param_set
+            )
+        elif len(PT_state) == 9:
+            a1_1, a2_1, log_P1_1, log_P2_1, a1_2, a2_2, log_P1_2, log_P2_2, T_deep = (
+                PT_state
+            )
+            log_P3 = np.log10(P_ref)
+            if (
+                (log_P3 < log_P2_1)
+                or (log_P3 < log_P1_1)
+                or (log_P3 < log_P2_2)
+                or (log_P3 < log_P1_2)
+            ):
+                return (0,) * 12 + (False,)
+            T_rough = compute_T_Madhu_2D(
+                P,
+                a1_1,
+                a2_1,
+                log_P1_1,
+                log_P2_1,
+                a1_2,
+                a2_2,
+                log_P1_2,
+                log_P2_2,
+                T_deep,
+                P_ref,
+                N_sectors,
+                N_zones,
+                alpha,
+                beta,
+                phi,
+                theta,
+            )
+        else:
+            raise ValueError(
+                f"Madhu PT_state must have length 6 (1D) or 9 (2D); got {len(PT_state)}"
+            )
         T = gauss_conv(T_rough, sigma=3, axis=0, mode="nearest")
     elif PT_profile == "slope":
         T_phot = PT_state[0]
@@ -632,20 +1264,112 @@ def profiles(
     elif PT_profile == "Guillot_dayside":
         log_kappa_IR, log_gamma, T_int, T_equ = PT_state
         T = compute_T_Guillot_dayside(P, g_0, log_kappa_IR, log_gamma, T_int, T_equ)
-    else:  # PT_profile == "Line"
+    elif PT_profile == "Line":
         log_kappa_IR, log_gamma, log_gamma_2, alpha_l, beta_l, T_int = PT_state
         if T_eq is None:
             raise ValueError("PT_profile='Line' requires T_eq")
         T = compute_T_Line(
             P, g_0, T_eq, log_kappa_IR, log_gamma, log_gamma_2, alpha_l, beta_l, T_int
         )
-
-    X_param = compute_X_isochem_1D(P, log_X_state, N_sectors, N_zones, param_species)
+    else:  # PT_profile == "file_read"
+        if T_input is None:
+            raise ValueError("PT_profile='file_read' requires T_input")
+        T = T_input.reshape((len(P), 1, 1))
 
     N_species = len(included_species)
-    X = add_bulk_component(
-        P, T, X_param, N_species, N_sectors, N_zones, bulk_species, He_fraction
-    )
+
+    species_has_profile = np.zeros(len(param_species)).astype(np.int64)
+    if X_profile in ("gradient", "two-gradients"):
+        species_has_profile[np.isin(param_species, species_vert_gradient)] = 1
+    elif X_profile == "dissociation":
+        if len(species_vert_gradient) == 0:
+            species_has_profile[:] = 1
+        else:
+            species_has_profile[np.isin(param_species, species_vert_gradient)] = 1
+
+    if X_profile == "file_read":
+        if X_input is None:
+            raise ValueError("X_profile='file_read' requires X_input")
+        X = X_input.reshape((N_species, len(P), 1, 1))
+    else:
+        if X_profile in ("isochem", "gradient"):
+            X_param = compute_X_field_gradient(
+                P,
+                log_X_state,
+                N_sectors,
+                N_zones,
+                param_species,
+                species_has_profile,
+                alpha,
+                beta,
+                phi,
+                theta,
+            )
+        elif X_profile == "two-gradients":
+            X_param = compute_X_field_two_gradients(
+                P,
+                log_X_state,
+                N_sectors,
+                N_zones,
+                param_species,
+                species_has_profile,
+                alpha,
+                beta,
+                phi,
+                theta,
+            )
+        elif X_profile == "lever":
+            if N_sectors != 1 or N_zones != 1:
+                raise Exception(
+                    "Error: Lever profile currently only implemented for "
+                    "1D atmospheres."
+                )
+            X_param = compute_X_lever(
+                P, log_X_state, species_has_profile, N_sectors, N_zones
+            )
+        elif X_profile == "dissociation":
+            X_param = compute_X_dissociation(
+                P,
+                T,
+                log_X_state,
+                N_sectors,
+                N_zones,
+                param_species,
+                species_has_profile,
+                alpha,
+                beta,
+                phi,
+                theta,
+            )
+        elif X_profile == "chem_eq":
+            from jaxposeidon._chemistry import interpolate_log_X_grid
+
+            C_to_O = log_X_state[0]
+            log_Met = log_X_state[1]
+            log_X_input = interpolate_log_X_grid(
+                chemistry_grid,
+                np.log10(P),
+                T,
+                C_to_O,
+                log_Met,
+                param_species,
+                return_dict=False,
+            )
+            X_param = 10**log_X_input
+
+        for q in range(len(param_species)):
+            if species_has_profile[q] == 1:
+                X_param[q, :, :, :] = gauss_conv(
+                    X_param[q, :, :, :], sigma=3, axis=0, mode="nearest"
+                )
+
+        if Na_K_fixed_ratio:
+            K_X_state = [X_param[list(param_species).index("Na")] * 0.1]
+            X_param = np.append(X_param, K_X_state, axis=0)
+
+        X = add_bulk_component(
+            P, T, X_param, N_species, N_sectors, N_zones, bulk_species, He_fraction
+        )
 
     if np.any(X[0, :, :, :] < 0.0):
         return (0,) * 12 + (False,)
@@ -666,8 +1390,11 @@ def profiles(
     for q in range(N_species):
         sp = included_species[q]
         if sp == "ghost":
-            raise NotImplementedError("ghost bulk species deferred to Phase 0.5.7")
-        masses_all[q] = _masses[sp]
+            if mu_back is None:
+                raise ValueError("ghost bulk species requires explicit mu_back kwarg")
+            masses_all[q] = mu_back
+        else:
+            masses_all[q] = _masses[sp]
     mu = compute_mean_mol_mass(P, X, N_species, N_sectors, N_zones, masses_all)
 
     if constant_gravity:

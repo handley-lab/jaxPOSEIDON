@@ -2,19 +2,48 @@
 
 import pytest
 
+
 def test_jaxposeidon_imports():
     """Package and stub modules import cleanly."""
     import jaxposeidon
     from jaxposeidon import (
-        _opacity_precompute, _opacities, _atmosphere, _chemistry, _clouds,
-        _instruments, _geometry, _transmission, _parameters, _data, _priors,
-        _constants, _species_data, _loaddata, _compute_spectrum, core,
+        _opacity_precompute,
+        _opacities,
+        _atmosphere,
+        _chemistry,
+        _clouds,
+        _instruments,
+        _geometry,
+        _transmission,
+        _parameters,
+        _data,
+        _priors,
+        _constants,
+        _species_data,
+        _loaddata,
+        _compute_spectrum,
+        core,
     )
+
     assert jaxposeidon.__version__.startswith("0.0.")
-    for mod in (_opacity_precompute, _opacities, _atmosphere, _chemistry,
-                _clouds, _instruments, _geometry, _transmission, _parameters,
-                _data, _priors, _constants, _species_data, _loaddata,
-                _compute_spectrum, core):
+    for mod in (
+        _opacity_precompute,
+        _opacities,
+        _atmosphere,
+        _chemistry,
+        _clouds,
+        _instruments,
+        _geometry,
+        _transmission,
+        _parameters,
+        _data,
+        _priors,
+        _constants,
+        _species_data,
+        _loaddata,
+        _compute_spectrum,
+        core,
+    ):
         assert mod is not None
 
 
@@ -22,17 +51,40 @@ def test_poseidon_oracle_available():
     """POSEIDON imports — required for all subsequent phase tests."""
     import POSEIDON
     from POSEIDON.core import (
-        create_star, create_planet, define_model,
-        read_opacities, make_atmosphere, compute_spectrum,
+        create_star,
+        create_planet,
+        define_model,
+        read_opacities,
+        make_atmosphere,
+        compute_spectrum,
     )
-    assert all(callable(f) for f in (
-        create_star, create_planet, define_model,
-        read_opacities, make_atmosphere, compute_spectrum,
-    ))
+
+    assert all(
+        callable(f)
+        for f in (
+            create_star,
+            create_planet,
+            define_model,
+            read_opacities,
+            make_atmosphere,
+            compute_spectrum,
+        )
+    )
 
 
-K2_18B_TARGETS = {"H2O", "CH4", "CO2", "CO", "NH3", "HCN",
-                  "OCS", "N2O", "CH3Cl", "CS2", "C2H6S"}
+K2_18B_TARGETS = {
+    "H2O",
+    "CH4",
+    "CO2",
+    "CO",
+    "NH3",
+    "HCN",
+    "OCS",
+    "N2O",
+    "CH3Cl",
+    "CS2",
+    "C2H6S",
+}
 
 
 def test_k2_18b_species_supported_in_poseidon():
@@ -53,12 +105,12 @@ def test_k2_18b_species_in_opacity_hdf5(poseidon_input_data):
     """
     import os
     import h5py
-    db_path = os.path.join(poseidon_input_data, "opacity",
-                           "Opacity_database_v1.3.hdf5")
+
+    db_path = os.path.join(poseidon_input_data, "opacity", "Opacity_database_v1.3.hdf5")
     if not os.path.isfile(db_path):
         import pytest
-        pytest.skip(f"{db_path} not found; opacity DB not installed at "
-                    f"this version.")
+
+        pytest.skip(f"{db_path} not found; opacity DB not installed at this version.")
 
     required_datasets = ("T", "log(P)", "nu", "log(sigma)")
     with h5py.File(db_path, "r") as f:
@@ -70,8 +122,7 @@ def test_k2_18b_species_in_opacity_hdf5(poseidon_input_data):
         for sp in sorted(K2_18B_TARGETS):
             for ds in required_datasets:
                 assert ds in f[sp], (
-                    f"{sp}/{ds} missing in {db_path} "
-                    f"(schema per absorption.py:929-943)"
+                    f"{sp}/{ds} missing in {db_path} (schema per absorption.py:929-943)"
                 )
 
 
@@ -88,10 +139,8 @@ def test_paired_oracle_harness_shape(monkeypatch):
     """
     from tests import oracle
 
-    monkeypatch.setattr(oracle, "canonical_rayleigh_config",
-                        lambda: {"wl": [0.0]})
-    monkeypatch.setattr(oracle, "poseidon_transmission_spectrum",
-                        lambda cfg: [0.0])
+    monkeypatch.setattr(oracle, "canonical_rayleigh_config", lambda: {"wl": [0.0]})
+    monkeypatch.setattr(oracle, "poseidon_transmission_spectrum", lambda cfg: [0.0])
 
     def jax_stub(cfg):
         raise NotImplementedError("jaxposeidon forward model: Phase 1+")
