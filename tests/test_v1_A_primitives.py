@@ -510,6 +510,267 @@ def test_apply_offsets_single_dataset_lumped_path():
     np.testing.assert_allclose(out, ref, rtol=1e-13, atol=0)
 
 
+def test_apply_offsets_two_datasets_lumped_path():
+    """Grouped paths for two datasets (POSEIDON `retrieval.py:1135-1148`)."""
+    from jaxposeidon._data import apply_offsets
+
+    rng = np.random.default_rng(10)
+    ydata = rng.uniform(0.013, 0.015, 40).astype(np.float64)
+    offset_params = np.array([30.0, -25.0])
+    s1, e1 = [0, 12], [5, 18]
+    s2, e2 = [20, 32], [25, 38]
+    out = np.array(
+        apply_offsets(
+            ydata,
+            offset_params,
+            offsets_applied="two_datasets",
+            offset_start=0,
+            offset_end=0,
+            offset_1_start=s1,
+            offset_1_end=e1,
+            offset_2_start=s2,
+            offset_2_end=e2,
+        )
+    )
+    ref = ydata.copy()
+    for s, e in zip(s1, e1, strict=True):
+        ref[s:e] -= offset_params[0] * 1e-6
+    for s, e in zip(s2, e2, strict=True):
+        ref[s:e] -= offset_params[1] * 1e-6
+    np.testing.assert_allclose(out, ref, rtol=1e-13, atol=0)
+
+
+def test_apply_offsets_three_datasets_lumped_path():
+    """Grouped paths for three datasets (POSEIDON `retrieval.py:1158-1174`)."""
+    from jaxposeidon._data import apply_offsets
+
+    rng = np.random.default_rng(12)
+    ydata = rng.uniform(0.013, 0.015, 50).astype(np.float64)
+    offset_params = np.array([15.0, -30.0, 45.0])
+    s1, e1 = [0, 10], [4, 14]
+    s2, e2 = [16, 26], [20, 30]
+    s3, e3 = [32, 42], [36, 46]
+    out = np.array(
+        apply_offsets(
+            ydata,
+            offset_params,
+            offsets_applied="three_datasets",
+            offset_start=0,
+            offset_end=0,
+            offset_1_start=s1,
+            offset_1_end=e1,
+            offset_2_start=s2,
+            offset_2_end=e2,
+            offset_3_start=s3,
+            offset_3_end=e3,
+        )
+    )
+    ref = ydata.copy()
+    for s, e in zip(s1, e1, strict=True):
+        ref[s:e] -= offset_params[0] * 1e-6
+    for s, e in zip(s2, e2, strict=True):
+        ref[s:e] -= offset_params[1] * 1e-6
+    for s, e in zip(s3, e3, strict=True):
+        ref[s:e] -= offset_params[2] * 1e-6
+    np.testing.assert_allclose(out, ref, rtol=1e-13, atol=0)
+
+
+def _numpy_loglikelihood_full(
+    ymodel,
+    ydata,
+    err_data,
+    *,
+    offset_params=(),
+    err_inflation_params=(),
+    offsets_applied=None,
+    error_inflation=None,
+    offset_start=0,
+    offset_end=0,
+    offset_1_start=0,
+    offset_1_end=0,
+    offset_2_start=0,
+    offset_2_end=0,
+    offset_3_start=0,
+    offset_3_end=0,
+    ln_prior_TP=0.0,
+):
+    """Line-for-line POSEIDON `retrieval.py:1065-1183` replication.
+
+    Covers the full v0-envelope likelihood including all three
+    `offsets_applied` paths and all four `error_inflation` modes.
+    """
+    if np.any(np.isnan(ymodel)):
+        return -1.0e100
+    err_data = np.asarray(err_data)
+    ymodel = np.asarray(ymodel)
+    if error_inflation is None:
+        err_eff_sq = err_data * err_data
+        norm_log = (-0.5 * np.log(2.0 * np.pi * err_data * err_data)).sum()
+    elif error_inflation == "Line15":
+        err_eff_sq = err_data * err_data + 10.0 ** err_inflation_params[0]
+        norm_log = (-0.5 * np.log(2.0 * np.pi * err_eff_sq)).sum()
+    elif error_inflation == "Piette20":
+        err_eff_sq = err_data * err_data + (err_inflation_params[0] * ymodel) ** 2
+        norm_log = (-0.5 * np.log(2.0 * np.pi * err_eff_sq)).sum()
+    else:  # "Line15+Piette20"
+        err_eff_sq = (
+            err_data * err_data
+            + 10.0 ** err_inflation_params[0]
+            + (err_inflation_params[1] * ymodel) ** 2
+        )
+        norm_log = (-0.5 * np.log(2.0 * np.pi * err_eff_sq)).sum()
+
+    ydata_adj = np.asarray(ydata).copy()
+    if offsets_applied == "single_dataset":
+        if np.isscalar(offset_1_start) and offset_1_start == 0:
+            ydata_adj[offset_start:offset_end] -= offset_params[0] * 1e-6
+        else:
+            for n in range(len(offset_1_start)):
+                ydata_adj[offset_1_start[n] : offset_1_end[n]] -= (
+                    offset_params[0] * 1e-6
+                )
+    elif offsets_applied == "two_datasets":
+        if np.isscalar(offset_1_start) and offset_1_start == 0:
+            ydata_adj[offset_start[0] : offset_end[0]] -= offset_params[0] * 1e-6
+            ydata_adj[offset_start[1] : offset_end[1]] -= offset_params[1] * 1e-6
+        else:
+            for n in range(len(offset_1_start)):
+                ydata_adj[offset_1_start[n] : offset_1_end[n]] -= (
+                    offset_params[0] * 1e-6
+                )
+            for m in range(len(offset_2_start)):
+                ydata_adj[offset_2_start[m] : offset_2_end[m]] -= (
+                    offset_params[1] * 1e-6
+                )
+    elif offsets_applied == "three_datasets":
+        if np.isscalar(offset_1_start) and offset_1_start == 0:
+            ydata_adj[offset_start[0] : offset_end[0]] -= offset_params[0] * 1e-6
+            ydata_adj[offset_start[1] : offset_end[1]] -= offset_params[1] * 1e-6
+            ydata_adj[offset_start[2] : offset_end[2]] -= offset_params[2] * 1e-6
+        else:
+            for n in range(len(offset_1_start)):
+                ydata_adj[offset_1_start[n] : offset_1_end[n]] -= (
+                    offset_params[0] * 1e-6
+                )
+            for m in range(len(offset_2_start)):
+                ydata_adj[offset_2_start[m] : offset_2_end[m]] -= (
+                    offset_params[1] * 1e-6
+                )
+            for s in range(len(offset_3_start)):
+                ydata_adj[offset_3_start[s] : offset_3_end[s]] -= (
+                    offset_params[2] * 1e-6
+                )
+    return float(
+        (-0.5 * (ymodel - ydata_adj) ** 2 / err_eff_sq).sum() + norm_log + ln_prior_TP
+    )
+
+
+def test_loglikelihood_two_dataset_offsets_matches_full_poseidon_oracle():
+    rng = np.random.default_rng(13)
+    n = 20
+    ymodel = rng.uniform(0.013, 0.015, n).astype(np.float64)
+    ydata = ymodel + rng.standard_normal(n) * 1e-4
+    err_data = np.full(n, 1.5e-4)
+    offset_params = np.array([35.0, -22.0])
+    ours = float(
+        loglikelihood(
+            ymodel,
+            ydata,
+            err_data,
+            offset_params=tuple(offset_params),
+            offsets_applied="two_datasets",
+            offset_start=[0, 10],
+            offset_end=[10, 20],
+        )
+    )
+    ref = _numpy_loglikelihood_full(
+        ymodel,
+        ydata,
+        err_data,
+        offset_params=offset_params,
+        offsets_applied="two_datasets",
+        offset_start=[0, 10],
+        offset_end=[10, 20],
+    )
+    np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
+
+
+def test_loglikelihood_three_dataset_offsets_with_inflation_matches_oracle():
+    rng = np.random.default_rng(14)
+    n = 30
+    ymodel = rng.uniform(0.013, 0.015, n).astype(np.float64)
+    ydata = ymodel + rng.standard_normal(n) * 1e-4
+    err_data = np.full(n, 1.5e-4)
+    offset_params = np.array([10.0, -20.0, 30.0])
+    err_inflation_params = np.array([-8.5, 0.1])
+    ours = float(
+        loglikelihood(
+            ymodel,
+            ydata,
+            err_data,
+            offset_params=tuple(offset_params),
+            err_inflation_params=tuple(err_inflation_params),
+            offsets_applied="three_datasets",
+            error_inflation="Line15+Piette20",
+            offset_start=[0, 10, 20],
+            offset_end=[10, 20, 30],
+        )
+    )
+    ref = _numpy_loglikelihood_full(
+        ymodel,
+        ydata,
+        err_data,
+        offset_params=offset_params,
+        err_inflation_params=err_inflation_params,
+        offsets_applied="three_datasets",
+        error_inflation="Line15+Piette20",
+        offset_start=[0, 10, 20],
+        offset_end=[10, 20, 30],
+    )
+    np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
+
+
+def test_loglikelihood_grouped_two_dataset_offsets_matches_oracle():
+    """Grouped path: offset_1_start / offset_2_start lists, full likelihood."""
+    rng = np.random.default_rng(15)
+    n = 40
+    ymodel = rng.uniform(0.013, 0.015, n).astype(np.float64)
+    ydata = ymodel.copy()
+    err_data = np.full(n, 1e-4)
+    offset_params = np.array([25.0, -15.0])
+    s1, e1 = [0, 12], [5, 18]
+    s2, e2 = [20, 32], [25, 38]
+    ours = float(
+        loglikelihood(
+            ymodel,
+            ydata,
+            err_data,
+            offset_params=tuple(offset_params),
+            offsets_applied="two_datasets",
+            offset_start=0,
+            offset_end=0,
+            offset_1_start=s1,
+            offset_1_end=e1,
+            offset_2_start=s2,
+            offset_2_end=e2,
+        )
+    )
+    ref = _numpy_loglikelihood_full(
+        ymodel,
+        ydata,
+        err_data,
+        offset_params=offset_params,
+        offsets_applied="two_datasets",
+        offset_start=0,
+        offset_end=0,
+        offset_1_start=s1,
+        offset_1_end=e1,
+        offset_2_start=s2,
+        offset_2_end=e2,
+    )
+    np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
+
+
 # ----------------------------- _priors CLR parity -----------------------------
 
 
@@ -558,6 +819,67 @@ def test_CLR_kernel_under_jit():
     cube = jnp.array([0.3, 0.7, 0.2, 0.2, 0.2])
     out = np.array(_kernel_with_CLR(cube, codes, lo, hi, 2, 5, 3, -12.0))
     assert out.shape == (5,)
+
+
+def test_CLR_Prior_accepted_matches_poseidon_oracle():
+    """Deterministic CLR-accepted draw against POSEIDON `retrieval.CLR_Prior`."""
+    from POSEIDON.retrieval import CLR_Prior as poseidon_CLR
+
+    from jaxposeidon._priors import CLR_Prior
+
+    # An interior draw (all 0.5) for 4-species is well inside the simplex.
+    chem_drawn = np.array([0.5, 0.5, 0.5, 0.5])
+    ours = np.array(CLR_Prior(chem_drawn, limit=-12.0))
+    theirs = poseidon_CLR(chem_drawn, limit=-12.0)
+    assert ours[0] != -50.0, "Expected accepted draw, got rejection"
+    np.testing.assert_allclose(ours, theirs, rtol=1e-13, atol=0)
+
+
+def test_CLR_Prior_rejected_matches_poseidon_oracle():
+    """Corner-of-cube draws fall outside the simplex; both implementations
+    must return the same `-50.0` sentinel vector."""
+    from POSEIDON.retrieval import CLR_Prior as poseidon_CLR
+
+    from jaxposeidon._priors import CLR_Prior
+
+    chem_drawn = np.array([1.0, 1.0, 1.0])  # corner draw, expected to reject
+    ours = np.array(CLR_Prior(chem_drawn, limit=-12.0))
+    theirs = poseidon_CLR(chem_drawn, limit=-12.0)
+    if theirs[0] == -50.0:
+        np.testing.assert_array_equal(ours, theirs)
+        np.testing.assert_array_equal(ours, np.full(4, -50.0))
+
+
+def test_prior_transform_CLR_rejection_propagates_sentinel_into_slice():
+    """A rejected CLR draw must fill the chemistry slice of the full cube
+    output with `-50.0` (POSEIDON `retrieval.py:861-887` allowed_simplex)."""
+    param_names = ["R_p", "log_H2O", "log_CH4", "log_NH3"]
+    prior_types = {
+        "R_p": "uniform",
+        "log_H2O": "CLR",
+        "log_CH4": "CLR",
+        "log_NH3": "CLR",
+    }
+    prior_ranges = {
+        "R_p": [0.9, 1.1],
+        "log_H2O": [-12.0, -1.0],
+        "log_CH4": [-12.0, -1.0],
+        "log_NH3": [-12.0, -1.0],
+    }
+    # Corner draw forces rejection.
+    unit_cube = np.array([0.5, 1.0, 1.0, 1.0])
+    N_params_cum = np.array([1, 1, 4, 4, 4, 4, 4, 4, 4, 4])
+    cube = np.array(
+        prior_transform(
+            unit_cube,
+            param_names,
+            prior_types,
+            prior_ranges,
+            X_param_names=["log_H2O", "log_CH4", "log_NH3"],
+            N_params_cum=N_params_cum,
+        )
+    )
+    np.testing.assert_array_equal(cube[1:4], np.full(3, -50.0))
 
 
 def test_prior_transform_public_under_jit_signature():

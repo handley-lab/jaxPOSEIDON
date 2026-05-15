@@ -103,9 +103,15 @@ def prior_transform(
     the sentinel value -50.0 (POSEIDON's allowed_simplex convention,
     retrieval.py:861-887); downstream likelihood checks for that.
 
-    The hot-path numeric kernel `_kernel_no_CLR` / `_kernel_with_CLR`
-    is jit-compiled; this public wrapper does the dict-to-array encoding
-    out of jit and dispatches.
+    This public wrapper performs the dict-to-array encoding out of jit
+    and dispatches to a jit-compiled kernel. Callers that need the
+    function inside their own `jax.jit` boundary (e.g. wrapped inside a
+    `make_loglikelihood` closure) should call the underlying kernels
+    directly: `_kernel_no_CLR(unit_cube, codes, range_lo, range_hi)` or
+    `_kernel_with_CLR(unit_cube, codes, range_lo, range_hi, CLR_lo,
+    CLR_hi, N_species_params, CLR_limit)` with pre-encoded inputs. The
+    public function is *not* itself jit-compatible because Python dicts
+    are not hashable static arguments.
     """
     valid = {"uniform", "gaussian", "sine", "CLR"}
     for parameter in param_names:
