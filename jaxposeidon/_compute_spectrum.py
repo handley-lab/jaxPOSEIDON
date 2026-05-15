@@ -24,6 +24,8 @@ non-physical upstream.
 import numpy as np
 
 from jaxposeidon._emission import (
+    assign_assumptions_and_compute_single_stream_emission,
+    build_surf_reflect,
     determine_photosphere_radii,
     emission_single_stream,
 )
@@ -90,8 +92,6 @@ def compute_spectrum(
         )
 
     disable_atmosphere = model["disable_atmosphere"]
-    if disable_atmosphere:
-        raise NotImplementedError("disable_atmosphere=True (bare-rock) is v1")
 
     if spectrum_type not in (
         "transmission",
@@ -121,11 +121,6 @@ def compute_spectrum(
             "solvers are ported, but their integration with compute_spectrum "
             "is the Phase 0.5.13e follow-up."
         )
-    if model.get("surface"):
-        raise NotImplementedError(
-            "surface coupling in emission/reflection is the Phase 0.5.13d follow-up."
-        )
-
     cloud_model = model.get("cloud_model", "cloud-free")
     if cloud_model not in _V0_CLOUD_MODELS:
         raise NotImplementedError(
@@ -146,7 +141,7 @@ def compute_spectrum(
             )
 
     # --- physical-atmosphere check is the LAST guard before computation ---
-    if not check_atmosphere_physical(atmosphere, opac):
+    if not disable_atmosphere and not check_atmosphere_physical(atmosphere, opac):
         out = np.empty(len(wl))
         out[:] = np.nan
         return out
@@ -178,6 +173,27 @@ def compute_spectrum(
     phi_cloud_0 = atmosphere["phi_cloud_0"]
     theta_cloud_0 = atmosphere["theta_cloud_0"]
     P_surf = atmosphere["P_surf"]
+    albedo_deck = atmosphere["albedo_deck"]
+    albedo_surf = atmosphere["albedo_surf"]
+    T_surf = atmosphere["T_surf"]
+    surface_component_percentages = atmosphere["surface_component_percentages"]
+    R_p_ref = atmosphere["R_p_ref"]
+
+    surface = model["surface"]
+    surface_model = model["surface_model"]
+    surface_components = model["surface_components"]
+    surface_component_albedos = model["surface_component_albedos"]
+    surface_percentage_apply_to = model["surface_percentage_apply_to"]
+
+    # POSEIDON core.py:1470-1472: renormalize percentages
+    if (
+        surface
+        and len(surface_component_percentages) > 0
+        and round(np.sum(surface_component_percentages)) != 1.0
+    ):
+        surface_component_percentages = surface_component_percentages / np.sum(
+            surface_component_percentages
+        )
 
     chemical_species = model["chemical_species"]
     active_species = model["active_species"]
@@ -208,42 +224,48 @@ def compute_spectrum(
     log_P_fine = opac["log_P_fine"]
 
     # ----- Phase 4: runtime extinction ---------------------------------------
-    kappa_gas, kappa_Ray, kappa_cloud, _kappa_sep = extinction(
-        chemical_species,
-        active_species,
-        CIA_pairs,
-        ff_pairs,
-        bf_species,
-        n,
-        T,
-        P,
-        wl,
-        X,
-        X_active,
-        X_CIA,
-        X_ff,
-        X_bf,
-        a,
-        gamma,
-        P_cloud,
-        kappa_cloud_0,
-        sigma_stored,
-        CIA_stored,
-        Rayleigh_stored,
-        ff_stored,
-        bf_stored,
-        enable_haze,
-        enable_deck,
-        enable_surface=0,
-        N_sectors=N_sectors,
-        N_zones=N_zones,
-        T_fine=T_fine,
-        log_P_fine=log_P_fine,
-        P_surf=P_surf,
-        enable_Mie=0,
-        n_aerosol_array=n_aerosol,
-        sigma_Mie_array=sigma_ext_cloud,
-    )
+    if disable_atmosphere:
+        N_wl = len(wl)
+        kappa_gas = np.zeros((len(P), N_sectors, N_zones, N_wl))
+        kappa_Ray = np.zeros_like(kappa_gas)
+        kappa_cloud = np.zeros_like(kappa_gas)
+    else:
+        kappa_gas, kappa_Ray, kappa_cloud, _kappa_sep = extinction(
+            chemical_species,
+            active_species,
+            CIA_pairs,
+            ff_pairs,
+            bf_species,
+            n,
+            T,
+            P,
+            wl,
+            X,
+            X_active,
+            X_CIA,
+            X_ff,
+            X_bf,
+            a,
+            gamma,
+            P_cloud,
+            kappa_cloud_0,
+            sigma_stored,
+            CIA_stored,
+            Rayleigh_stored,
+            ff_stored,
+            bf_stored,
+            enable_haze,
+            enable_deck,
+            enable_surface=(1 if surface else 0),
+            N_sectors=N_sectors,
+            N_zones=N_zones,
+            T_fine=T_fine,
+            log_P_fine=log_P_fine,
+            P_surf=P_surf,
+            enable_Mie=0,
+            n_aerosol_array=n_aerosol,
+            sigma_Mie_array=sigma_ext_cloud,
+        )
 
     if is_emission:
         if "dayside" in spectrum_type:
@@ -253,23 +275,77 @@ def compute_spectrum(
         else:
             zone_idx = 0
 
-        dz = dr[:, 0, zone_idx]
-        T_em = T[:, 0, zone_idx]
-        kappa_tot = (
-            kappa_gas[:, 0, zone_idx, :]
-            + kappa_Ray[:, 0, zone_idx, :]
-            + kappa_cloud[:, 0, zone_idx, :]
-        )
-        F_p, dtau = emission_single_stream(T_em, dz, wl, kappa_tot, Gauss_quad)
-        dtau = np.flip(dtau, axis=0)
+        if not disable_atmosphere:
+            dz = dr[:, 0, zone_idx]
+            T_em = T[:, 0, zone_idx]
+            kappa_tot = (
+                kappa_gas[:, 0, zone_idx, :]
+                + kappa_Ray[:, 0, zone_idx, :]
+                + kappa_cloud[:, 0, zone_idx, :]
+            )
+            dtau_tot = np.ascontiguousarray(kappa_tot * dz.reshape((len(P), 1)))
+        else:
+            dz = np.array([])
+            T_em = np.array([])
+            kappa_tot = np.array([])
+            dtau_tot = np.array([])
 
-        if use_photosphere_radius:
+        use_surface_path = surface or albedo_deck != -1 or disable_atmosphere
+        if use_surface_path:
+            surf_reflect, surf_reflect_array = build_surf_reflect(
+                wl,
+                surface,
+                surface_model,
+                albedo_deck,
+                albedo_surf,
+                surface_components,
+                surface_component_albedos,
+                surface_component_percentages,
+                surface_percentage_apply_to,
+            )
+            cloud_dim = model.get("cloud_dim", 1)
+            aerosol_species = model.get("aerosol_species", [])
+            F_p, dtau = assign_assumptions_and_compute_single_stream_emission(
+                P,
+                T_em,
+                dz,
+                wl,
+                kappa_tot,
+                dtau_tot,
+                kappa_gas if not disable_atmosphere else np.array([]),
+                kappa_Ray if not disable_atmosphere else np.array([]),
+                kappa_cloud if not disable_atmosphere else np.array([]),
+                np.array([]),
+                zone_idx,
+                Gauss_quad,
+                P_cloud,
+                cloud_dim,
+                aerosol_species,
+                f_cloud,
+                albedo_deck,
+                disable_atmosphere,
+                surface,
+                surface_model,
+                P_surf,
+                T_surf,
+                surf_reflect,
+                surf_reflect_array,
+                surface_component_percentages,
+                surface_percentage_apply_to,
+            )
+        else:
+            F_p, dtau = emission_single_stream(T_em, dz, wl, kappa_tot, Gauss_quad)
+            dtau = np.flip(dtau, axis=0)
+
+        if use_photosphere_radius and not disable_atmosphere:
             R_p_eff = determine_photosphere_radii(
                 np.flip(dtau, axis=0),
                 np.flip(r_low[:, 0, zone_idx]),
                 wl,
                 photosphere_tau=2 / 3,
             )
+        elif disable_atmosphere:
+            R_p_eff = R_p_ref
         else:
             R_p_eff = planet["planet_radius"]
 
