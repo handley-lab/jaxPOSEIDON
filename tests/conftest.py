@@ -14,6 +14,9 @@ that want the *real* opacity database; it skips when
 
 import os
 import pytest
+import jax
+
+jax.config.update("jax_enable_x64", True)
 
 # POSEIDON.emission reads `block` and `thread` from os.environ at import
 # time (CUDA grid sizing for the GPU planck path). Default them here so
