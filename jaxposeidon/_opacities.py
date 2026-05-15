@@ -8,7 +8,7 @@ v0 envelope:
 - enable_haze in {0, 1}
 - enable_deck in {0, 1}
 - enable_surface = 0 (deferred)
-- enable_Mie = 0 (deferred)
+- enable_Mie in {0, 1} (Phase 0.5.12b)
 - N_ff_pairs = 0 (H-minus deferred)
 - N_bf_species = 0 (H-minus deferred)
 - ff_stored, bf_stored may be supplied but ignored
@@ -65,17 +65,14 @@ def extinction(
     """Compute kappa_gas, kappa_Ray, kappa_cloud arrays.
 
     Bit-exact port of POSEIDON `absorption.py:1034-1227` for the v0
-    envelope (no surface, no Mie). Surface and Mie configurations
-    raise NotImplementedError. H-minus ff/bf opacity is ported in
+    envelope plus the Phase 0.5.13d surface branch and Phase 0.5.12b
+    Mie aerosol branches. H-minus ff/bf opacity is ported in
     Phase 0.5.4: ``ff_pairs`` / ``bf_species`` non-empty are accepted
     and processed via the precomputed ``ff_stored`` / ``bf_stored``
     arrays (built by POSEIDON's ``opacity_tables(...)`` using
     ``_h_minus.H_minus_free_free`` and ``_h_minus.H_minus_bound_free``
     once the read_opacities port lifts the POSEIDON delegation).
     """
-    if enable_Mie == 1:
-        raise NotImplementedError("Mie clouds deferred to v1")
-
     N_species = len(chemical_species)
     N_species_active = len(active_species)
     N_cia_pairs = len(cia_pairs)
@@ -148,5 +145,38 @@ def extinction(
 
             if enable_surface == 1:
                 kappa_gas[(P_surf < P), j, k, :] = 1.0e250
+
+            if enable_Mie == 1:
+                # Port of POSEIDON `absorption.py:1199-1224`.
+                if len(n_aerosol_array) == len(sigma_Mie_array):
+                    for aer in range(len(n_aerosol_array)):
+                        for i in range(i_bot, N_layers):
+                            for q in range(len(wl)):
+                                kappa_cloud[i, j, k, q] += (
+                                    n_aerosol_array[aer][i, j, k]
+                                    * sigma_Mie_array[aer][q]
+                                )
+                                kappa_cloud_separate[aer, i, j, k, q] += (
+                                    n_aerosol_array[aer][i, j, k]
+                                    * sigma_Mie_array[aer][q]
+                                )
+                else:
+                    for aer in range(len(n_aerosol_array)):
+                        if aer == 0:
+                            kappa_cloud[(P_cloud[0] < P), j, k, :] += 1.0e250
+                            kappa_cloud_separate[aer, (P_cloud[0] < P), j, k, :] += (
+                                1.0e250
+                            )
+                        else:
+                            for i in range(i_bot, N_layers):
+                                for q in range(len(wl)):
+                                    kappa_cloud[i, j, k, q] += (
+                                        n_aerosol_array[aer][i, j, k]
+                                        * sigma_Mie_array[aer - 1][q]
+                                    )
+                                    kappa_cloud_separate[aer, i, j, k, q] += (
+                                        n_aerosol_array[aer][i, j, k]
+                                        * sigma_Mie_array[aer - 1][q]
+                                    )
 
     return kappa_gas, kappa_Ray, kappa_cloud, kappa_cloud_separate

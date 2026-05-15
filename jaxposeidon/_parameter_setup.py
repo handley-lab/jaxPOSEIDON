@@ -50,7 +50,19 @@ V05_X_PROFILES = frozenset(
     }
 )
 V0_CLOUD_MODELS = frozenset({"cloud-free", "MacMad17"})
+V05_CLOUD_MODELS = frozenset({"cloud-free", "MacMad17", "Mie"})
 V0_CLOUD_TYPES = frozenset({"deck", "haze", "deck_haze"})
+V05_MIE_CLOUD_TYPES = frozenset(
+    {
+        "uniform_X",
+        "slab",
+        "fuzzy_deck",
+        "opaque_deck_plus_uniform_X",
+        "opaque_deck_plus_slab",
+        "fuzzy_deck_plus_slab",
+        "one_slab",
+    }
+)
 V0_CLOUD_DIMS = frozenset({1, 2})
 V0_REFERENCE_PARAMETERS = frozenset({"R_p_ref", "P_ref", "R_p_ref+P_ref"})
 V0_OFFSETS = frozenset({None, "single_dataset", "two_datasets", "three_datasets"})
@@ -126,9 +138,9 @@ def assert_v0_model_config(
         raise NotImplementedError(
             f"X_profile={X_profile!r} not in v0.5 set ({sorted(V05_X_PROFILES)})"
         )
-    if cloud_model not in V0_CLOUD_MODELS:
+    if cloud_model not in V05_CLOUD_MODELS:
         raise NotImplementedError(
-            f"cloud_model={cloud_model!r} not in v0 ({sorted(V0_CLOUD_MODELS)})"
+            f"cloud_model={cloud_model!r} not in v0.5 ({sorted(V05_CLOUD_MODELS)})"
         )
     if cloud_dim not in V0_CLOUD_DIMS:
         raise NotImplementedError(
@@ -138,6 +150,25 @@ def assert_v0_model_config(
         raise NotImplementedError(
             f"cloud_type={cloud_type!r} not in v0 ({sorted(V0_CLOUD_TYPES)})"
         )
+    if cloud_model == "Mie":
+        if cloud_type not in V05_MIE_CLOUD_TYPES:
+            raise NotImplementedError(
+                f"Mie cloud_type={cloud_type!r} not in v0.5.12b "
+                f"({sorted(V05_MIE_CLOUD_TYPES)})"
+            )
+        if cloud_dim != 1:
+            raise NotImplementedError(
+                "Mie cloud_dim != 1 (patchy Mie) deferred to a follow-up"
+            )
+        if not list(aerosol_species):
+            raise Exception(
+                "Error: cloud_model='Mie' requires a non-empty aerosol_species list."
+            )
+        if list(aerosol_species) in (["free"], ["file_read"]):
+            raise NotImplementedError(
+                "Mie aerosol_species=['free'|'file_read']: LX-MIE / file_read "
+                "paths are the Phase 0.5.12c follow-up"
+            )
     if cloud_model == "cloud-free" and cloud_type != "deck":
         raise NotImplementedError(
             f"cloud_type={cloud_type!r} ignored by cloud-free models in "
@@ -174,8 +205,13 @@ def assert_v0_model_config(
         )
     # high_res_method is a list/string of method names; POSEIDON validates
     # internally at retrieval time. No setup-layer rejection here.
-    if opaque_Iceberg or list(aerosol_species):
-        raise NotImplementedError("Iceberg/Mie aerosols are deferred to v1")
+    if opaque_Iceberg:
+        raise NotImplementedError("Iceberg aerosols are deferred to v1")
+    if list(aerosol_species) and cloud_model != "Mie":
+        raise NotImplementedError(
+            "aerosol_species is only valid with cloud_model='Mie'; "
+            "Iceberg/eddysed aerosol parameter paths are deferred to v1"
+        )
     if list(species_EM_gradient) or list(species_DN_gradient):
         raise NotImplementedError(
             "species_EM_gradient / species_DN_gradient require 2D/3D "
@@ -403,7 +439,7 @@ def assign_free_params(
     N_species_params = len(X_params)
     params += X_params
 
-    # Cloud parameters (parameters.py:719-743, MacMad17)
+    # Cloud parameters (parameters.py:719-743, MacMad17; :776-976, Mie)
     if cloud_model == "cloud-free":
         cloud_params = []
     elif cloud_model == "MacMad17":
@@ -413,6 +449,62 @@ def assign_free_params(
             cloud_params += ["log_P_cloud"]
         if cloud_dim == 2:
             cloud_params += ["phi_cloud"]
+    elif cloud_model == "Mie":
+        # POSEIDON parameters.py:802-885, aerosol-species-list path only
+        # (cloud_dim=1, no shiny/uniaxial/biaxial). Supported types in
+        # V05_MIE_CLOUD_TYPES.
+        if cloud_type == "fuzzy_deck":
+            for aerosol in aerosol_species:
+                cloud_params += [
+                    f"log_P_top_deck_{aerosol}",
+                    f"log_r_m_{aerosol}",
+                    f"log_n_max_{aerosol}",
+                    f"f_{aerosol}",
+                ]
+        elif cloud_type == "slab":
+            for aerosol in aerosol_species:
+                cloud_params += [
+                    f"log_P_top_slab_{aerosol}",
+                    f"Delta_log_P_{aerosol}",
+                    f"log_r_m_{aerosol}",
+                    f"log_X_{aerosol}",
+                ]
+        elif cloud_type == "fuzzy_deck_plus_slab":
+            for index, aerosol in enumerate(aerosol_species):
+                if index == 0:
+                    cloud_params += [
+                        f"log_P_top_deck_{aerosol}",
+                        f"log_r_m_{aerosol}",
+                        f"log_n_max_{aerosol}",
+                        f"f_{aerosol}",
+                    ]
+                else:
+                    cloud_params += [
+                        f"log_P_top_slab_{aerosol}",
+                        f"Delta_log_P_{aerosol}",
+                        f"log_r_m_{aerosol}",
+                        f"log_X_{aerosol}",
+                    ]
+        elif cloud_type == "opaque_deck_plus_slab":
+            cloud_params += ["log_P_top_deck"]
+            for aerosol in aerosol_species:
+                cloud_params += [
+                    f"log_P_top_slab_{aerosol}",
+                    f"Delta_log_P_{aerosol}",
+                    f"log_r_m_{aerosol}",
+                    f"log_X_{aerosol}",
+                ]
+        elif cloud_type == "uniform_X":
+            for aerosol in aerosol_species:
+                cloud_params += [f"log_r_m_{aerosol}", f"log_X_{aerosol}"]
+        elif cloud_type == "opaque_deck_plus_uniform_X":
+            cloud_params += ["log_P_top_deck"]
+            for aerosol in aerosol_species:
+                cloud_params += [f"log_r_m_{aerosol}", f"log_X_{aerosol}"]
+        elif cloud_type == "one_slab":
+            cloud_params += ["log_P_top_slab", "Delta_log_P"]
+            for aerosol in aerosol_species:
+                cloud_params += [f"log_r_m_{aerosol}", f"log_X_{aerosol}"]
     N_cloud_params = len(cloud_params)
     params += cloud_params
 

@@ -163,7 +163,7 @@ def test_v0_config_accepts_k2_18b_one_offset():
                 cloud_dim=2,
                 aerosol_species=("ZnS",),
             ),
-            "Iceberg/Mie",
+            "aerosol_species is only valid",
         ),
         # Phase 0.5.2b: gravity_setting/mass_setting='free' now supported.
         # Phase 0.5.7: species_vert_gradient + ghost bulk now supported.
@@ -235,7 +235,7 @@ def test_v0_config_accepts_k2_18b_one_offset():
                 cloud_dim=2,
                 opaque_Iceberg=True,
             ),
-            "Iceberg/Mie",
+            "Iceberg",
         ),
         (
             dict(
