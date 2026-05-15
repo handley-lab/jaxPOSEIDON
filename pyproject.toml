@@ -72,6 +72,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "jaxposeidon/__init__.py" = ["F401", "E402"]  # re-exports + jax_enable_x64 before imports
 "jaxposeidon/core.py" = ["F401"]
+# POSEIDON-mirror module — verbatim port of contributions.py keeps the
+# original branch structure and condition ordering for review parity.
+"jaxposeidon/_contributions.py" = ["SIM109", "SIM114", "SIM300"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -86,12 +86,6 @@ def compute_spectrum(
             "return_albedo=True applies to emission/reflection spectrum_types; "
             "the spectrum_type dispatch wiring is the Phase 0.5.13c follow-up."
         )
-    if len(kappa_contributions) or len(cloud_properties_contributions):
-        raise NotImplementedError(
-            "kappa_contributions / cloud_properties_contributions are the "
-            "Phase 0.5.17b follow-up."
-        )
-
     disable_atmosphere = model["disable_atmosphere"]
 
     if spectrum_type not in (
@@ -214,7 +208,14 @@ def compute_spectrum(
     Rayleigh_stored = opac["Rayleigh_stored"]
 
     # ----- Phase 4: runtime extinction ---------------------------------------
-    if disable_atmosphere:
+    if len(kappa_contributions):
+        kappa_gas, kappa_Ray, kappa_cloud, _kappa_sep = (
+            kappa_contributions[0],
+            kappa_contributions[1],
+            kappa_contributions[2],
+            kappa_contributions[3],
+        )
+    elif disable_atmosphere:
         N_wl = len(wl)
         kappa_gas = np.zeros((len(P), N_sectors, N_zones, N_wl))
         kappa_Ray = np.zeros_like(kappa_gas)
