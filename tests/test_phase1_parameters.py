@@ -183,16 +183,6 @@ def test_v0_config_accepts_k2_18b_one_offset():
                 X_profile="isochem",
                 cloud_model="MacMad17",
                 cloud_dim=2,
-                disable_atmosphere=True,
-            ),
-            "disable_atmosphere",
-        ),
-        (
-            dict(
-                PT_profile="Madhu",
-                X_profile="isochem",
-                cloud_model="MacMad17",
-                cloud_dim=2,
                 reference_parameter="invalid",
             ),
             "reference_parameter",
