@@ -16,7 +16,6 @@ from scipy.interpolate import RegularGridInterpolator
 
 from jaxposeidon._aerosol_db_loader import load_aerosol_grid  # noqa: F401
 
-
 _MIE_SUPPORTED_CLOUD_TYPES = frozenset(
     {
         "uniform_X",

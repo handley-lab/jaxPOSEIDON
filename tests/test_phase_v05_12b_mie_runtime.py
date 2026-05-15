@@ -240,7 +240,7 @@ def _aerosol_grid(tmp_path, species=("H2O", "ZnS")):
     from jaxposeidon._aerosol_db_loader import load_aerosol_grid
 
     _synthetic_aerosol_db(tmp_path, aerosol_species=species)
-    os.environ["POSEIDON_input_data"] = str(tmp_path) + os.sep
+    os.environ["POSEIDON_input_data"] = str(tmp_path) + os.sep  # noqa: SIM112
     return load_aerosol_grid(list(species))
 
 
