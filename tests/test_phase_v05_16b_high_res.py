@@ -193,7 +193,7 @@ def test_get_rot_kernel_matches_poseidon():
 # ---------------------------------------------------------------------------
 # remove_outliers
 # ---------------------------------------------------------------------------
-def test_remove_outliers_matches_poseidon(capsys):
+def test_remove_outliers_matches_poseidon():
     from POSEIDON.high_res import remove_outliers as p_ro
 
     rng = _rng(2)

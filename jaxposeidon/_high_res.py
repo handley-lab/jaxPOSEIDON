@@ -15,7 +15,10 @@ The PCA-based and h5py-based pieces (`make_data_cube`, `PCA_rebuild`,
 """
 
 import numpy as np
-from scipy import constants
+
+# Speed of light in m/s (CODATA, SI-exact). Matches POSEIDON's
+# `scipy.constants.c` used at `high_res.py:377, 564, 570, 686, 687, 927`.
+_C_M_PER_S = 299792458.0
 
 
 def airtovac(wlum):
@@ -206,7 +209,7 @@ def cross_correlate(
     for RV_i, RV in enumerate(RV_range):
         for ord_i in range(nord):
             wl_slice = wl_grid[ord_i]
-            delta_lambda = RV * 1e3 / constants.c
+            delta_lambda = RV * 1e3 / _C_M_PER_S
             wl_shifted = wl * (1.0 + delta_lambda)
             F_p = np.interp(wl_slice, wl_shifted, planet_spectrum)
             models_shifted[RV_i, ord_i] = F_p
