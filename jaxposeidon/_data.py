@@ -15,12 +15,15 @@ Reject NaN-bearing spectra with the same -1e100 sentinel POSEIDON uses
 (`retrieval.py:1066-1072`).
 """
 
-import jax.numpy as jnp
-import numpy as np
+import jax
+
+jax.config.update("jax_enable_x64", True)
+
+import jax.numpy as jnp  # noqa: E402
 
 
 def _is_scalar_zero_marker(v):
-    return np.isscalar(v) and v == 0
+    return isinstance(v, (int, float)) and v == 0
 
 
 def apply_offsets(

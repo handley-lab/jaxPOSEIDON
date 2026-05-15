@@ -12,7 +12,11 @@ scipy convention (`scipy/ndimage/_filters.py:_gaussian_kernel1d`):
   pad region — equivalent to "edge" padding).
 """
 
-import jax.numpy as jnp
+import jax
+
+jax.config.update("jax_enable_x64", True)
+
+import jax.numpy as jnp  # noqa: E402
 
 
 def _kernel(sigma: float, truncate: float = 4.0):

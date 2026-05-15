@@ -9,13 +9,20 @@
   clip (no extrapolation). Used by `_chemistry.py:121`, `_clouds.py:162`.
 """
 
-import jax.numpy as jnp
+import jax
+
+jax.config.update("jax_enable_x64", True)
+
+import jax.numpy as jnp  # noqa: E402
 
 
 def _pchip_derivatives(x, y):
     h = x[1:] - x[:-1]
     delta = (y[1:] - y[:-1]) / h
     n = x.shape[0]
+
+    if n == 2:
+        return jnp.array([delta[0], delta[0]], dtype=y.dtype)
 
     d_inner_num = 3.0 * (h[:-1] + h[1:])
     d_inner_denom = (2.0 * h[1:] + h[:-1]) / delta[:-1] + (
@@ -36,11 +43,7 @@ def _pchip_derivatives(x, y):
     d_first = _end_deriv(h[0], h[1], delta[0], delta[1])
     d_last = _end_deriv(h[-1], h[-2], delta[-1], delta[-2])
 
-    if n == 2:
-        d = jnp.array([delta[0], delta[0]], dtype=y.dtype)
-    else:
-        d = jnp.concatenate([jnp.array([d_first]), d_inner, jnp.array([d_last])])
-    return d
+    return jnp.concatenate([jnp.array([d_first]), d_inner, jnp.array([d_last])])
 
 
 def pchip_interpolate(x, y, xq):

@@ -11,43 +11,39 @@ Prior types and POSEIDON oracle references:
 - 'sine' (alpha/beta)   (`retrieval.py:666-678`)
 - 'sine' (theta_0)      (`retrieval.py:679-684`)
 - 'CLR' (mixing ratios) (`retrieval.py:547-594, 861-887`)
+
+Integer codes used by the jit kernel: 0=uniform, 1=gaussian,
+2=sine(alpha|beta), 3=sine(theta_0), 4=CLR.
 """
 
-from functools import partial
+import jax
 
-import jax.numpy as jnp
-import numpy as np
-from jax import jit
+jax.config.update("jax_enable_x64", True)
 
-from jaxposeidon._jax_special import ndtri
+from functools import partial  # noqa: E402
 
-PRIOR_TYPES = frozenset({"uniform", "gaussian", "sine", "CLR"})
-SINE_ALPHA_BETA = frozenset({"alpha", "beta"})
-SINE_THETA_0 = "theta_0"
+import jax.numpy as jnp  # noqa: E402
+from jax import jit  # noqa: E402
 
-_PTYPE_UNIFORM = 0
-_PTYPE_GAUSSIAN = 1
-_PTYPE_SINE_ALPHA_BETA = 2
-_PTYPE_SINE_THETA_0 = 3
-_PTYPE_CLR = 4
+from jaxposeidon._jax_special import ndtri  # noqa: E402
 
 
 def _ptype_code(name, ptype):
     if ptype == "uniform":
-        return _PTYPE_UNIFORM
+        return 0
     if ptype == "gaussian":
-        return _PTYPE_GAUSSIAN
+        return 1
     if ptype == "sine":
-        if name in SINE_ALPHA_BETA:
-            return _PTYPE_SINE_ALPHA_BETA
-        if name == SINE_THETA_0:
-            return _PTYPE_SINE_THETA_0
+        if name in ("alpha", "beta"):
+            return 2
+        if name == "theta_0":
+            return 3
         raise NotImplementedError(
             f"sine prior on {name!r} not in v0 "
             "(POSEIDON only uses sine for alpha/beta/theta_0)"
         )
     if ptype == "CLR":
-        return _PTYPE_CLR
+        return 4
     raise NotImplementedError(
         f"prior_type={ptype!r} not supported (uniform/gaussian/sine/CLR)"
     )
@@ -60,9 +56,9 @@ def CLR_Prior(chem_params_drawn, limit=-12.0):
     length-(n+1) array of log10 mixing ratios on success, or
     `[-50.0]*(n+1)` if the draw falls outside the allowed simplex.
 
-    Implementation uses `jnp` arithmetic with `jnp.where`-based
-    branching so the kernel is jit-able. The Python ``len(...)`` call
-    on the input keeps `n` static; pass a fixed-size array under jit.
+    Implementation uses `jnp` arithmetic with `jnp.where`-based branching
+    so the kernel is jit-able. The Python ``shape[0]`` call on the input
+    keeps `n` static; pass a fixed-size array under jit.
     """
     chem_params_drawn = jnp.asarray(chem_params_drawn, dtype=jnp.float64)
     n = chem_params_drawn.shape[0]
@@ -107,51 +103,46 @@ def prior_transform(
     the sentinel value -50.0 (POSEIDON's allowed_simplex convention,
     retrieval.py:861-887); downstream likelihood checks for that.
 
-    Public signature is preserved from v0.5 so the existing test surface
-    keeps working. For jit-able callers, see
-    `prior_transform_kernel(unit_cube, codes, range_lo, range_hi, ...)`.
+    The hot-path numeric kernel `_kernel_no_CLR` / `_kernel_with_CLR`
+    is jit-compiled; this public wrapper does the dict-to-array encoding
+    out of jit and dispatches.
     """
+    valid = {"uniform", "gaussian", "sine", "CLR"}
     for parameter in param_names:
-        if prior_types[parameter] not in PRIOR_TYPES:
+        if prior_types[parameter] not in valid:
             raise NotImplementedError(
                 f"prior_type={prior_types[parameter]!r} not supported "
                 "(uniform/gaussian/sine/CLR)"
             )
 
-    if "CLR" in prior_types.values() and (
-        X_param_names is None or N_params_cum is None
-    ):
+    has_CLR = "CLR" in prior_types.values()
+    if has_CLR and (X_param_names is None or N_params_cum is None):
         raise ValueError("CLR prior requires X_param_names and N_params_cum kwargs")
 
-    codes = np.array(
-        [_ptype_code(p, prior_types[p]) for p in param_names], dtype=np.int32
+    codes = jnp.asarray(
+        [_ptype_code(p, prior_types[p]) for p in param_names], dtype=jnp.int32
     )
-    range_lo = np.array([prior_ranges[p][0] for p in param_names], dtype=np.float64)
-    range_hi = np.array([prior_ranges[p][1] for p in param_names], dtype=np.float64)
+    range_lo = jnp.asarray([prior_ranges[p][0] for p in param_names], dtype=jnp.float64)
+    range_hi = jnp.asarray([prior_ranges[p][1] for p in param_names], dtype=jnp.float64)
     unit_cube_arr = jnp.asarray(unit_cube, dtype=jnp.float64)
 
-    if X_param_names is not None and "CLR" in prior_types.values():
+    if has_CLR:
         N_species_params = len(X_param_names)
         CLR_lo = int(N_params_cum[1])
         CLR_hi = int(N_params_cum[2])
         CLR_limit = float(prior_ranges[X_param_names[0]][0])
         return _kernel_with_CLR(
             unit_cube_arr,
-            jnp.asarray(codes),
-            jnp.asarray(range_lo),
-            jnp.asarray(range_hi),
+            codes,
+            range_lo,
+            range_hi,
             CLR_lo,
             CLR_hi,
             N_species_params,
             CLR_limit,
         )
 
-    return _kernel_no_CLR(
-        unit_cube_arr,
-        jnp.asarray(codes),
-        jnp.asarray(range_lo),
-        jnp.asarray(range_hi),
-    )
+    return _kernel_no_CLR(unit_cube_arr, codes, range_lo, range_hi)
 
 
 @jit
@@ -160,7 +151,7 @@ def _kernel_no_CLR(unit_cube, codes, range_lo, range_hi):
 
 
 def _apply_non_CLR(unit_cube, codes, range_lo, range_hi):
-    pi = jnp.float64(np.pi)
+    pi = jnp.float64(jnp.pi)
     uniform = unit_cube * (range_hi - range_lo) + range_lo
     gaussian = range_lo + range_hi * ndtri(unit_cube)
     sine_ab = (
@@ -173,10 +164,10 @@ def _apply_non_CLR(unit_cube, codes, range_lo, range_hi):
     )
 
     out = unit_cube
-    out = jnp.where(codes == _PTYPE_UNIFORM, uniform, out)
-    out = jnp.where(codes == _PTYPE_GAUSSIAN, gaussian, out)
-    out = jnp.where(codes == _PTYPE_SINE_ALPHA_BETA, sine_ab, out)
-    out = jnp.where(codes == _PTYPE_SINE_THETA_0, sine_t0, out)
+    out = jnp.where(codes == 0, uniform, out)
+    out = jnp.where(codes == 1, gaussian, out)
+    out = jnp.where(codes == 2, sine_ab, out)
+    out = jnp.where(codes == 3, sine_t0, out)
     return out
 
 

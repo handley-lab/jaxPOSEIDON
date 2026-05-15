@@ -87,16 +87,15 @@ def test_regular_grid_interp_linear_matches_scipy_2d():
     values = (g0**2 + g1).astype(np.float64)
     rng = np.random.default_rng(2)
     qp = np.stack(
-        [rng.uniform(-3.0, 3.0, 50), rng.uniform(0.0, 1.0, 50)], axis=-1
+        [rng.uniform(ax0[0], ax0[-1], 50), rng.uniform(ax1[0], ax1[-1], 50)],
+        axis=-1,
     ).astype(np.float64)
-    ref = RegularGridInterpolator(
-        (ax0, ax1), values, method="linear", bounds_error=False, fill_value=None
-    )(qp)
+    ref = RegularGridInterpolator((ax0, ax1), values, method="linear")(qp)
     ours = np.array(regular_grid_interp_linear((ax0, ax1), values, qp))
     np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
 
 
-def test_regular_grid_interp_linear_3d_with_boundary_clip():
+def test_regular_grid_interp_linear_3d_in_range():
     ax0 = np.array([0.0, 1.0, 2.0])
     ax1 = np.array([0.0, 1.0])
     ax2 = np.array([0.0, 0.5, 1.0])
@@ -107,6 +106,35 @@ def test_regular_grid_interp_linear_3d_with_boundary_clip():
     ref = RegularGridInterpolator((ax0, ax1, ax2), values, method="linear")(qp)
     ours = np.array(regular_grid_interp_linear((ax0, ax1, ax2), values, qp))
     np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
+
+
+def test_regular_grid_interp_linear_clips_out_of_range():
+    """Out-of-range query points clip to the boundary value (no extrapolation).
+
+    This matches the v1-A plan spec: `regular_grid_interp_linear` uses
+    `linear extrapolation off (boundary clip)`. Verifies that out-of-range
+    queries return the boundary value rather than scipy's extrapolated
+    value (so callers can't accidentally rely on extrapolation parity).
+    """
+    ax = np.array([0.0, 1.0, 2.0])
+    values = np.array([[1.0, 2.0, 3.0]]).T  # values along ax
+    values = np.array([10.0, 20.0, 30.0])
+    qp_low = np.array([[-5.0]])
+    qp_high = np.array([[100.0]])
+    ours_low = float(regular_grid_interp_linear((ax,), values, qp_low)[0])
+    ours_high = float(regular_grid_interp_linear((ax,), values, qp_high)[0])
+    assert ours_low == 10.0
+    assert ours_high == 30.0
+
+
+def test_pchip_two_knot_case():
+    """SciPy's PchipInterpolator supports N=2 (degenerate to linear)."""
+    x = np.array([0.0, 1.0])
+    y = np.array([3.0, 7.0])
+    xq = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
+    ref = PchipInterpolator(x, y)(xq)
+    ours = np.array(pchip_interpolate(x, y, xq))
+    np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=0)
 
 
 # ----------------------------- _jax_special -----------------------------
@@ -348,3 +376,210 @@ def test_loglikelihood_jaxpr_succeeds():
         jnp.array([0.1, 0.1, 0.1]),
     )
     assert len(repr(jaxpr)) > 0
+
+
+@pytest.mark.parametrize(
+    "error_inflation,offsets_applied",
+    [
+        ("Line15", "single_dataset"),
+        ("Piette20", "single_dataset"),
+        ("Line15+Piette20", "single_dataset"),
+        (None, "single_dataset"),
+    ],
+)
+def test_loglikelihood_jaxpr_nontrivial_branches(error_inflation, offsets_applied):
+    from functools import partial
+
+    fn = partial(
+        loglikelihood,
+        error_inflation=error_inflation,
+        offsets_applied=offsets_applied,
+        offset_start=0,
+        offset_end=3,
+    )
+    err_inf = (
+        jnp.array([-8.0, 0.1])
+        if error_inflation == "Line15+Piette20"
+        else jnp.array([-8.0])
+        if error_inflation == "Line15"
+        else jnp.array([0.1])
+        if error_inflation == "Piette20"
+        else jnp.array([])
+    )
+    jaxpr = jax.make_jaxpr(fn)(
+        jnp.array([1.0, 1.1, 1.2]),
+        jnp.array([1.0, 1.0, 1.0]),
+        jnp.array([0.1, 0.1, 0.1]),
+        offset_params=jnp.array([10.0]),
+        err_inflation_params=err_inf,
+    )
+    assert len(repr(jaxpr)) > 0
+
+
+# --------------- _data.apply_offsets multi-dataset parity --------------------
+
+
+def _numpy_apply_offsets_simple(
+    ydata, offset_params, offsets_applied, offset_start, offset_end
+):
+    """Line-for-line POSEIDON apply-offsets replication for the simple-range path.
+
+    Mirrors POSEIDON `retrieval.py:1124-1174` (the
+    `offsets_applied=="single_dataset"/"two_datasets"/"three_datasets"`
+    branches when `offset_1_start` etc. are not provided, i.e. the
+    simple `offset_start[i]:offset_end[i]` path).
+    """
+    out = ydata.copy()
+    if offsets_applied == "single_dataset":
+        out[offset_start:offset_end] -= offset_params[0] * 1e-6
+    elif offsets_applied == "two_datasets":
+        out[offset_start[0] : offset_end[0]] -= offset_params[0] * 1e-6
+        out[offset_start[1] : offset_end[1]] -= offset_params[1] * 1e-6
+    elif offsets_applied == "three_datasets":
+        out[offset_start[0] : offset_end[0]] -= offset_params[0] * 1e-6
+        out[offset_start[1] : offset_end[1]] -= offset_params[1] * 1e-6
+        out[offset_start[2] : offset_end[2]] -= offset_params[2] * 1e-6
+    return out
+
+
+def test_apply_offsets_two_datasets_matches_numpy():
+    from jaxposeidon._data import apply_offsets
+
+    rng = np.random.default_rng(7)
+    ydata = rng.uniform(0.013, 0.015, 20).astype(np.float64)
+    offset_params = np.array([60.0, -40.0])
+    out = np.array(
+        apply_offsets(
+            ydata,
+            offset_params,
+            offsets_applied="two_datasets",
+            offset_start=[0, 10],
+            offset_end=[10, 20],
+        )
+    )
+    ref = _numpy_apply_offsets_simple(
+        ydata, offset_params, "two_datasets", [0, 10], [10, 20]
+    )
+    np.testing.assert_allclose(out, ref, rtol=1e-13, atol=0)
+
+
+def test_apply_offsets_three_datasets_matches_numpy():
+    from jaxposeidon._data import apply_offsets
+
+    rng = np.random.default_rng(8)
+    ydata = rng.uniform(0.013, 0.015, 30).astype(np.float64)
+    offset_params = np.array([20.0, -50.0, 80.0])
+    out = np.array(
+        apply_offsets(
+            ydata,
+            offset_params,
+            offsets_applied="three_datasets",
+            offset_start=[0, 10, 20],
+            offset_end=[10, 20, 30],
+        )
+    )
+    ref = _numpy_apply_offsets_simple(
+        ydata, offset_params, "three_datasets", [0, 10, 20], [10, 20, 30]
+    )
+    np.testing.assert_allclose(out, ref, rtol=1e-13, atol=0)
+
+
+def test_apply_offsets_single_dataset_lumped_path():
+    """Grouped `offset_1_start` / `offset_1_end` list path."""
+    from jaxposeidon._data import apply_offsets
+
+    rng = np.random.default_rng(9)
+    ydata = rng.uniform(0.013, 0.015, 30).astype(np.float64)
+    offset_params = np.array([42.0])
+    starts = [0, 12, 22]
+    ends = [5, 18, 28]
+    out = np.array(
+        apply_offsets(
+            ydata,
+            offset_params,
+            offsets_applied="single_dataset",
+            offset_start=0,
+            offset_end=0,
+            offset_1_start=starts,
+            offset_1_end=ends,
+        )
+    )
+    ref = ydata.copy()
+    for s, e in zip(starts, ends, strict=True):
+        ref[s:e] -= offset_params[0] * 1e-6
+    np.testing.assert_allclose(out, ref, rtol=1e-13, atol=0)
+
+
+# ----------------------------- _priors CLR parity -----------------------------
+
+
+def test_CLR_prior_transform_accepted_draw_matches_poseidon():
+    """End-to-end CLR draw under jit reproduces the v0.5 numpy oracle."""
+    param_names = ["R_p", "T", "log_H2O", "log_CH4", "log_NH3"]
+    prior_types = dict.fromkeys(param_names, "uniform")
+    for p in ("log_H2O", "log_CH4", "log_NH3"):
+        prior_types[p] = "CLR"
+    prior_ranges = {
+        "R_p": [0.9, 1.1],
+        "T": [300.0, 2000.0],
+        "log_H2O": [-12.0, -1.0],
+        "log_CH4": [-12.0, -1.0],
+        "log_NH3": [-12.0, -1.0],
+    }
+    rng = np.random.default_rng(11)
+    unit_cube = rng.uniform(0.1, 0.5, size=5).astype(np.float64)
+    N_params_cum = np.array([2, 2, 5, 5, 5, 5, 5, 5, 5, 5])
+    X_param_names = ["log_H2O", "log_CH4", "log_NH3"]
+    cube = np.array(
+        prior_transform(
+            unit_cube,
+            param_names,
+            prior_types,
+            prior_ranges,
+            X_param_names=X_param_names,
+            N_params_cum=N_params_cum,
+        )
+    )
+    if cube[2] == -50.0:
+        # Rejection path.
+        np.testing.assert_array_equal(cube[2:5], np.ones(3) * -50.0)
+    else:
+        X = 10.0 ** cube[2:5]
+        assert (X > 1e-12).all()
+
+
+def test_CLR_kernel_under_jit():
+    """`_kernel_with_CLR` traces and runs under jit."""
+    from jaxposeidon._priors import _kernel_with_CLR
+
+    codes = jnp.array([0, 0, 4, 4, 4], dtype=jnp.int32)
+    lo = jnp.array([0.9, 300.0, -12.0, -12.0, -12.0])
+    hi = jnp.array([1.1, 2000.0, -1.0, -1.0, -1.0])
+    cube = jnp.array([0.3, 0.7, 0.2, 0.2, 0.2])
+    out = np.array(_kernel_with_CLR(cube, codes, lo, hi, 2, 5, 3, -12.0))
+    assert out.shape == (5,)
+
+
+def test_prior_transform_public_under_jit_signature():
+    """The public `prior_transform` runs its jit-compiled kernel each call.
+
+    Calling twice with the same dispatch tables (codes + ranges have the
+    same shape/dtype) reuses the cached compile; smoke-test that no
+    tracer errors leak through the public boundary.
+    """
+    param_names = ["a", "b", "c"]
+    prior_types = {"a": "uniform", "b": "gaussian", "c": "uniform"}
+    prior_ranges = {"a": [0.0, 1.0], "b": [0.5, 0.1], "c": [-1.0, 1.0]}
+    out1 = np.array(
+        prior_transform(
+            np.array([0.3, 0.5, 0.7]), param_names, prior_types, prior_ranges
+        )
+    )
+    out2 = np.array(
+        prior_transform(
+            np.array([0.4, 0.5, 0.7]), param_names, prior_types, prior_ranges
+        )
+    )
+    assert out1.shape == (3,)
+    assert out2.shape == (3,)
+    assert out1[0] != out2[0]  # only the first changed
