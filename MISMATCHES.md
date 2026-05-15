@@ -79,3 +79,57 @@ label.
   at PR-merge time. The Mie cloud runtime port is shipped with parity tests
   passing locally and on CI (Python 3.11 + 3.12); manual review against
   POSEIDON `clouds.py` is a follow-up.
+
+## Phase 0.5.18 final audit — remaining v0.5 gaps (carry to v0.5.x / v0.6)
+
+OpenAI adversarial review of `origin/main` at SHA `bdc6940` (post-#27)
+surfaced the following gaps. The corresponding kernels / parameter
+plumbing are ported and tested at the unit-function level; the gaps
+listed below are at the **public API / dispatch** boundary — i.e. the
+kwargs are accepted but the dispatch falls through to
+`NotImplementedError` rather than routing to the already-ported kernel.
+
+These are not silent fall-throughs: the user gets a clear
+`NotImplementedError` pointing at the follow-up phase. Listed here as
+honest scope-deferrals from the v0.5.0 tag.
+
+### Public setup API not yet POSEIDON-free
+- `_setup_api.py:205-228` — `define_model`, `read_opacities`,
+  `make_atmosphere` still delegate to `POSEIDON.core` rather than the
+  native dispatch promised in Phase 0.5.2a's end-state.
+- `_loaddata.py:29-31, 54-69` — `init_instrument` / `load_data` ditto.
+- Workaround: callers can still use the function — it works — but
+  requires POSEIDON installed at runtime.
+
+### Spectrum-type dispatch gaps in `_compute_spectrum`
+- `_compute_spectrum.py:84-88` — `return_albedo=True` raises (Toon
+  reflection kernel ported in 0.5.13b, dispatch wiring deferred).
+- `_compute_spectrum.py:91-101` — `spectrum_type="reflection"` raises
+  (reflection_Toon ported, dispatcher wiring deferred).
+- `_compute_spectrum.py:109-113` — `thermal_scattering=True` /
+  `reflection=True` in emission raise (Toon thermal solver ported,
+  integration deferred).
+
+### Setup-api kwarg surface in `create_star`
+- `_setup_api.py:80-92` — `stellar_contam`, non-blackbody
+  `stellar_grid`, `stellar_grid="custom"` still raise; the underlying
+  stellar contamination forward model (`_stellar.py`,
+  `_stellar_grid_loader.py`) is ported and unit-tested.
+
+### Atmosphere-construction gaps
+- `_atmosphere.py:1138` — `disable_atmosphere=True` in `profiles(...)`
+  raises; bare-rock support lands at the `compute_spectrum` level (PR
+  #23) but `profiles` itself does not yet accept the bare-rock path.
+
+### Contribution kernels — partial surface
+- `_contributions.py` — `enable_surface=1` and `enable_Mie=1` raise in
+  the kernels; the underlying surface (0.5.13d) and Mie (0.5.12b)
+  runtime paths are ported but their contribution-channel integration
+  is a follow-up.
+
+### Architectural carry-over for v1
+- Module-level frozensets in `_compute_spectrum.py:49-51`,
+  `_atmosphere.py:35-60, 661-669`, `_retrieval.py:33` are immutable
+  dispatch tables and should move to `_constants.py` or to setup-only
+  modules per `CLAUDE.md §3`. They function correctly today but are a
+  cleanup item before the v1 JAX-trace gate.
