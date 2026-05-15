@@ -101,8 +101,6 @@ def assert_v0_model_config(
     """
     if object_type != "transiting":
         raise NotImplementedError("v0 supports object_type='transiting' only")
-    if disable_atmosphere:
-        raise NotImplementedError("v0 does not support disable_atmosphere=True")
     if reference_parameter not in V0_REFERENCE_PARAMETERS:
         raise NotImplementedError(
             f"reference_parameter={reference_parameter!r} not in v0 "

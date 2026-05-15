@@ -711,6 +711,190 @@ def reflection_Toon(
     return albedo
 
 
+def build_surf_reflect(
+    wl,
+    surface,
+    surface_model,
+    albedo_deck,
+    albedo_surf,
+    surface_components,
+    surface_component_albedos,
+    surface_component_percentages,
+    surface_percentage_apply_to,
+):
+    """Construct ``(surf_reflect, surf_reflect_array)``.
+
+    Bit-equivalent port of POSEIDON ``core.py:1741-1770`` (the CPU branch
+    of the inline `surf_reflect` construction inside `compute_spectrum`).
+    """
+    from jaxposeidon._surface_setup import interpolate_surface_components
+
+    if surface or albedo_deck != -1:
+        if surface:
+            if surface_model == "gray":
+                surf_reflect = np.zeros_like(wl)
+                surf_reflect_array = []
+            elif surface_model == "constant":
+                surf_reflect = np.full_like(wl, albedo_surf)
+                surf_reflect_array = []
+            elif surface_model == "lab_data":
+                surf_reflect_array = interpolate_surface_components(
+                    wl, surface_components, surface_component_albedos
+                )
+                if surface_percentage_apply_to == "albedos":
+                    surf_reflect = np.zeros_like(wl)
+                    for n in range(len(surface_component_percentages)):
+                        surf_reflect += (
+                            surface_component_percentages[n] * surf_reflect_array[n]
+                        )
+                else:
+                    surf_reflect = np.full_like(wl, -1.0)
+        else:
+            surf_reflect = np.full_like(wl, albedo_deck)
+            surf_reflect_array = []
+    else:
+        surf_reflect = np.full_like(wl, -1.0)
+        surf_reflect_array = []
+    return surf_reflect, surf_reflect_array
+
+
+def assign_assumptions_and_compute_single_stream_emission(
+    P,
+    T,
+    dz,
+    wl,
+    kappa_tot,
+    dtau_tot,
+    kappa_gas,
+    kappa_Ray,
+    kappa_cloud,
+    kappa_cloud_seperate,
+    zone_idx,
+    Gauss_quad,
+    P_cloud,
+    cloud_dim,
+    aerosol_species,
+    f_cloud,
+    albedo_deck,
+    disable_atmosphere,
+    surface,
+    surface_model,
+    P_surf,
+    T_surf,
+    surf_reflect,
+    surf_reflect_array,
+    surface_component_percentages,
+    surface_percentage_apply_to,
+):
+    """Surface/albedo-aware single-stream emission orchestrator.
+
+    Bit-equivalent port of POSEIDON `emission.py:1681-1878` (CPU-only
+    subset; thermal_scattering branch and GPU exits are not ported).
+    """
+    from jaxposeidon._surface_setup import find_nearest_less_than
+
+    if cloud_dim == 2:
+        kappa_cloud_clear = np.zeros_like(kappa_cloud)
+        kappa_tot_clear = (
+            kappa_gas[:, 0, zone_idx, :]
+            + kappa_Ray[:, 0, zone_idx, :]
+            + kappa_cloud_clear[:, 0, zone_idx, :]
+        )
+        dtau_tot_clear = np.ascontiguousarray(  # noqa: F841
+            kappa_tot_clear * dz.reshape((len(P), 1))
+        )
+        if len(aerosol_species) >= 2:
+            raise Exception(
+                "In single stream emission, only one aerosol species can be "
+                "patchy. For two, use thermal_scattering = True."
+            )
+
+    if surface or albedo_deck != -1:
+        if not disable_atmosphere:
+            if surface:
+                index_below_P_surf = find_nearest_less_than(P_surf, P)
+                if index_below_P_surf + 1 != len(P):
+                    index_below_P_surf -= 1
+            else:
+                try:
+                    index_below_P_surf = find_nearest_less_than(P_cloud, P)
+                except Exception:
+                    index_below_P_surf = find_nearest_less_than(P_cloud[0], P)
+                if index_below_P_surf + 1 != len(P):
+                    index_below_P_surf -= 1
+
+        if (
+            (surface_model == "gray")
+            or (surface_model == "constant")
+            or (albedo_deck != -1)
+            or (
+                surface_model == "lab_data" and surface_percentage_apply_to == "albedos"
+            )
+        ):
+            if not disable_atmosphere:
+                F_p, _dtau = emission_single_stream_w_albedo(
+                    T, dz, wl, kappa_tot, Gauss_quad, surf_reflect, index_below_P_surf
+                )
+                if cloud_dim == 2:
+                    F_p_clear, _ = emission_single_stream_w_albedo(
+                        T,
+                        dz,
+                        wl,
+                        kappa_tot_clear,
+                        Gauss_quad,
+                        surf_reflect,
+                        index_below_P_surf,
+                    )
+                    F_p = (f_cloud * F_p) + ((1 - f_cloud) * F_p_clear)
+            else:
+                F_p = emission_bare_surface(T_surf, wl, surf_reflect)
+        elif surface_model == "lab_data" and surface_percentage_apply_to == "models":
+            F_p_array = []
+            for surf_reflect_n in surf_reflect_array:
+                if not disable_atmosphere:
+                    F_p_temp, _ = emission_single_stream_w_albedo(
+                        T,
+                        dz,
+                        wl,
+                        kappa_tot,
+                        Gauss_quad,
+                        surf_reflect_n,
+                        index_below_P_surf,
+                    )
+                    if cloud_dim == 2:
+                        F_p_clear, _ = emission_single_stream_w_albedo(
+                            T,
+                            dz,
+                            wl,
+                            kappa_tot_clear,
+                            Gauss_quad,
+                            surf_reflect_n,
+                            index_below_P_surf,
+                        )
+                        F_p_temp = (f_cloud * F_p_temp) + ((1 - f_cloud) * F_p_clear)
+                else:
+                    F_p_temp = emission_bare_surface(T_surf, wl, surf_reflect_n)
+                F_p_array.append(F_p_temp)
+            F_p = np.zeros_like(wl)
+            for n in range(len(surface_component_percentages)):
+                F_p += surface_component_percentages[n] * F_p_array[n]
+
+        if not disable_atmosphere:
+            dtau = dtau_tot
+        else:
+            dtau = 0
+    else:
+        F_p, dtau = emission_single_stream(T, dz, wl, kappa_tot, Gauss_quad)
+        dtau = np.flip(dtau, axis=0)
+        if cloud_dim == 2:
+            F_p_clear, dtau = emission_single_stream(
+                T, dz, wl, kappa_tot_clear, Gauss_quad
+            )
+            F_p = (f_cloud * F_p) + ((1 - f_cloud) * F_p_clear)
+
+    return F_p, dtau
+
+
 def reflection_bare_surface(wl, surf_reflect, Gauss_quad=5):
     """Bare-rock reflected-light albedo with 5-pt Gaussian disk integration.
 
