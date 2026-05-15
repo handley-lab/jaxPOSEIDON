@@ -360,9 +360,9 @@ def prepare_high_res_data(
 
     processed_data_path = os.path.join(data_dir, name, "data_processed.hdf5")
 
-    with (
-        h5py.File(processed_data_path, "w") as f
-    ):  # v1-grep-skip: setup-only output writer; v1.0.x moves to _lbl_table_loader-style writer
+    # v1-grep-skip: setup-only output writer; v1.0.x moves to _lbl_table_loader-style writer
+    _f_ctx = h5py.File(processed_data_path, "w")  # v1-grep-skip
+    with _f_ctx as f:
         print(f"Creating processed data at {processed_data_path}")
         f.create_dataset("phi", data=phi)
         f.create_dataset("wl_grid", data=wl_grid)

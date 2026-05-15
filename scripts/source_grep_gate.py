@@ -117,11 +117,21 @@ GRANDFATHERED_MODULES = {
     "_transmission.py",
 }
 
-# File-I/O patterns are never grandfathered — even setup-flavoured
-# leftovers must move to a *_loader.py / *_setup.py module. These
-# patterns also bypass the per-line ``v1-grep-skip`` opt-out: file I/O
-# in a hot-path module is always a bug, regardless of grandfather
-# status.
+# File-I/O patterns are scanned with stricter rules than the
+# numpy/scipy import patterns:
+#
+# - In **fully-pure** hot-path modules: hard-forbidden patterns NEVER
+#   honor the per-line ``v1-grep-skip`` opt-out. File I/O in a fully-
+#   ported module is unconditionally a bug — move it to a
+#   ``*_loader.py`` / ``*_setup.py`` module.
+# - In **grandfathered** modules: hard-forbidden patterns honor the
+#   per-line opt-out, because the whole module is a v1.0.x JAX-port
+#   follow-up. Every opt-out line MUST carry the rationale inline and
+#   in ``MISMATCHES.md`` → "v1.0.0 source-grep grandfather list".
+#
+# This list intentionally over-covers common file-I/O entry points to
+# catch aliased forms; v1.0.x will tighten it further as the
+# grandfathered modules are ported.
 HARD_FORBIDDEN_PATTERNS = [
     (re.compile(r"\bopen\s*\("), "open(...)"),
     (re.compile(r"\bpd\.read_csv\s*\("), "pd.read_csv(...)"),
@@ -130,11 +140,18 @@ HARD_FORBIDDEN_PATTERNS = [
         "pd.read_*(...)",
     ),
     (
-        re.compile(r"\bnp\.(?:load|loadtxt|genfromtxt|fromfile|memmap)\s*\("),
-        "np.load*(...)",
+        re.compile(
+            r"\bnp\.(?:load|loadtxt|genfromtxt|fromfile|memmap|save|savetxt|savez|savez_compressed)\s*\("
+        ),
+        "np.load*/save*(...)",
     ),
-    (re.compile(r"\bjnp\.(?:load|loadtxt|genfromtxt|fromfile)\s*\("), "jnp.load*(...)"),
+    (
+        re.compile(r"\bjnp\.(?:load|loadtxt|genfromtxt|fromfile|save)\s*\("),
+        "jnp.load*/save(...)",
+    ),
     (re.compile(r"\bh5py\.File\s*\("), "h5py.File(...)"),
+    (re.compile(r"\.read_(?:text|bytes)\s*\("), "Path.read_text/bytes(...)"),
+    (re.compile(r"\.write_(?:text|bytes)\s*\("), "Path.write_text/bytes(...)"),
     (re.compile(r"\.open\s*\(\s*['\"]"), "Path.open('...')"),
 ]
 

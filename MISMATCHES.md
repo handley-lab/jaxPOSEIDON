@@ -408,10 +408,18 @@ Python-string dispatch to a JAX-traceable closure.
 
 The single-stream emission parity check in
 `test_emission_single_stream_jit_matches_poseidon` runs at
-`rtol=1e-12` rather than the strict `rtol=1e-13` default. This is
-the FP-reorder relaxation already documented for the v1-D Toon
-emission flow (Thomas tridiagonal `lax.scan` vs numba in-place loop);
-the single-stream solver shares the same `lax.scan` reduction over
-layers. The relaxation is consistent with the v1-D entries above
-(rtol=1e-13 → 1e-13 for the leaf reductions, rtol=1e-12 once the
-layer-stacked accumulation is included) and not a new mismatch.
+`rtol=1e-12` rather than the strict `rtol=1e-13` default. This is a
+distinct relaxation from the v1-D Toon Thomas tridiagonal entry above
+(single-stream does not use Thomas), with the following separate
+rationale: the JAX single-stream solver
+(`_emission.emission_single_stream`) accumulates per-layer
+contributions via a `lax.scan` over the `(N_layers,)` axis, against
+POSEIDON's numba Python `for i in range(N_layers)` in-place
+accumulation. The reduction order matches but XLA's FMA / pairwise-
+sum scheduling differs, producing ULP-scale residuals at the
+`(N_layers=20, N_wl=16, Gauss_quad=2)` test configuration:
+max observed `rtol ≈ 2.3e-13` (well within `rtol=1e-12` but above the
+strict `1e-13` default). This is the same class of XLA-vs-numpy
+reduction-order residual as the v1-B FP-reorder entry; the tolerance
+is component-specific per the plan's "default rtol=1e-13, relax with
+explicit MISMATCHES entry" policy.
