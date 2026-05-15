@@ -392,6 +392,26 @@ def test_extinction_LBL_haze_and_deck_matches_poseidon(tmp_path, monkeypatch):
     assert np.any(kc_ours > 0.0)
 
 
+def test_extinction_LBL_enable_surface_matches_poseidon(tmp_path, monkeypatch):
+    """Parity with enable_surface=1 (kappa_gas saturates below P_surf)."""
+    from POSEIDON.absorption import extinction_LBL as p_extLBL
+
+    monkeypatch.setenv("POSEIDON_input_data", str(tmp_path))
+    call_args = _build_minimal_call(tmp_path, seed=22)
+    call_args["enable_surface"] = 1
+    # Pick a P_surf inside the layer range so the saturated branch fires.
+    call_args["P_surf"] = 1.0e-1
+
+    kg_ours, kr_ours, kc_ours = _lbl.extinction_LBL(**call_args)
+    kg_t, kr_t, kc_t = p_extLBL(**call_args)
+
+    np.testing.assert_allclose(kg_ours, kg_t, atol=1e-50, rtol=1e-5)
+    np.testing.assert_allclose(kr_ours, kr_t, atol=0, rtol=1e-13)
+    np.testing.assert_allclose(kc_ours, kc_t, atol=0, rtol=1e-13)
+    # The surface-saturated sentinel (1e250) must appear somewhere.
+    assert np.any(kg_ours >= 1.0e249)
+
+
 def test_extinction_LBL_ff_bf_matches_poseidon(tmp_path, monkeypatch):
     """Parity with H-minus free-free + bound-free included."""
     from POSEIDON.absorption import extinction_LBL as p_extLBL

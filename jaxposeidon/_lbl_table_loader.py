@@ -6,11 +6,9 @@ Setup-only: h5py / file I/O permitted. Must not be called from inside
 The LBL HDF5 tables (`Opacity_database_v1.3.hdf5` ~10+ GB,
 `Opacity_database_cia.hdf5` ~few GB) live at
 `$POSEIDON_input_data/opacity/`. The loader signatures mirror
-POSEIDON's `absorption.py:1739-1951` file-opening logic so callers can
-inject the same opened h5py.File handles consumed by `compute_kappa_LBL`.
-
-The full extinction_LBL orchestrator is a follow-up; this slice gives
-a stable place for the path-construction logic to live.
+POSEIDON's `absorption.py:1794-1818` file-opening logic; the resulting
+`(opac_file, cia_file)` handles are consumed by `extinction_LBL` in
+`jaxposeidon/_lbl.py`.
 """
 
 import os
