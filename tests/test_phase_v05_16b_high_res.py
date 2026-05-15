@@ -53,6 +53,18 @@ def test_fit_out_transit_spec_matches_poseidon(spec):
     np.testing.assert_allclose(ours, theirs, atol=0, rtol=1e-13)
 
 
+def test_fit_out_transit_spec_bad_spec_raises():
+    """POSEIDON `high_res.py:330-331` raises Exception on unknown spec."""
+    from POSEIDON.high_res import fit_out_transit_spec as p_fit
+
+    flux, _ = _synthetic_cube(nord=2, nphi=4, npix=10)
+    transit_weight = np.array([1.0, 1.0, 0.0, 1.0])
+    with pytest.raises(Exception, match="mean"):
+        _high_res.fit_out_transit_spec(flux, transit_weight, spec="mode", Print=False)
+    with pytest.raises(Exception, match="mean"):
+        p_fit(flux, transit_weight, spec="mode", Print=False)
+
+
 # ---------------------------------------------------------------------------
 # get_RV_range
 # ---------------------------------------------------------------------------
@@ -130,6 +142,29 @@ def test_cross_correlate_matches_poseidon(transit):
     np.testing.assert_allclose(ours[1], theirs[1], atol=0, rtol=1e-13)
 
 
+def test_cross_correlate_no_V_bary_matches_poseidon():
+    """POSEIDON `high_res.py:357-359` falls back to zeros when V_bary is absent."""
+    from POSEIDON.high_res import cross_correlate as p_cc
+
+    nord, nphi, npix = 2, 5, 30
+    data = _ccf_data(nord, nphi, npix, transit=False)
+    del data["V_bary"]
+    rng = _rng(11)
+    wl = np.linspace(0.95, 1.6, 400)
+    planet_spectrum = 0.001 * rng.standard_normal(wl.size)
+    Kp_range = np.linspace(150, 200, 3)
+    Vsys_range = np.linspace(-10, 10, 5)
+    RV_range = _high_res.get_RV_range(Kp_range, Vsys_range, data["phi"])
+    ours = _high_res.cross_correlate(
+        Kp_range, Vsys_range, RV_range, wl, planet_spectrum, data, Print=False
+    )
+    theirs = p_cc(
+        Kp_range, Vsys_range, RV_range, wl, planet_spectrum, data, Print=False
+    )
+    np.testing.assert_allclose(ours[0], theirs[0], atol=0, rtol=1e-13)
+    np.testing.assert_allclose(ours[1], theirs[1], atol=0, rtol=1e-13)
+
+
 # ---------------------------------------------------------------------------
 # get_rot_kernel
 # ---------------------------------------------------------------------------
@@ -137,7 +172,16 @@ def test_get_rot_kernel_matches_poseidon():
     from POSEIDON.high_res import get_rot_kernel as p_rk
 
     wl = np.linspace(1.0, 1.5, 1000)
-    for V_sin_i, W_conv in [(5.0, 21), (10.0, 11), (3.0, 7)]:
+    # Mix of odd, even, and non-integer W_conv — POSEIDON `high_res.py:847`
+    # casts via int(W_conv) and centres asymmetrically when even.
+    for V_sin_i, W_conv in [
+        (5.0, 21),
+        (10.0, 11),
+        (3.0, 7),
+        (5.0, 20),
+        (5.0, 8),
+        (5.0, 15.7),
+    ]:
         np.testing.assert_allclose(
             _high_res.get_rot_kernel(V_sin_i, wl, W_conv),
             p_rk(V_sin_i, wl, W_conv),
