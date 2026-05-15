@@ -22,15 +22,20 @@ Numerical strategy: bit-equivalent port via float64 numpy and scipy's
 versions are a v1 work item.
 """
 
-import numpy as np
-import scipy
-import scipy.constants as sc
-from scipy.interpolate import pchip_interpolate
-from scipy.ndimage import gaussian_filter1d
+import jax
 
-from jaxposeidon._opacity_precompute import prior_index
-from jaxposeidon._species_data import inactive_species as _INACTIVE_SPECIES_LOCAL
-from jaxposeidon._species_data import masses as _masses
+jax.config.update("jax_enable_x64", True)
+
+import jax.numpy as jnp  # noqa: E402
+import numpy as np  # noqa: E402  (used by setup-time helpers; hot-path uses jnp)
+import scipy.constants as sc  # noqa: E402  (CODATA float constants only)
+
+from jaxposeidon._jax_filters import gaussian_filter1d_edge  # noqa: E402
+from jaxposeidon._jax_interpolate import pchip_interpolate  # noqa: E402
+from jaxposeidon._jax_special import expn_2  # noqa: E402
+from jaxposeidon._opacity_precompute import prior_index  # noqa: E402
+from jaxposeidon._species_data import inactive_species as _INACT  # noqa: E402
+from jaxposeidon._species_data import masses as _masses  # noqa: E402
 
 _V0_PT_PROFILES = frozenset({"isotherm", "Madhu"})
 _V05_PT_PROFILES = frozenset(
@@ -69,7 +74,7 @@ def compute_T_isotherm(P, T_iso):
     Mirrors `POSEIDON/atmosphere.py:2152-2161` (no Gaussian smoothing for
     isotherm).
     """
-    return T_iso * np.ones(shape=(len(P), 1, 1))
+    return T_iso * jnp.ones(shape=(len(P), 1, 1), dtype=jnp.float64)
 
 
 def compute_T_Madhu(P, a1, a2, log_P1, log_P2, log_P3, T_set, P_set):
@@ -79,42 +84,49 @@ def compute_T_Madhu(P, a1, a2, log_P1, log_P2, log_P3, T_set, P_set):
     Gaussian-smooth the output with `gauss_conv(...)` to match POSEIDON
     `atmosphere.py:2262`.
     """
-    N_layers = len(P)
-    T = np.zeros(shape=(N_layers, 1, 1))
+    P = jnp.asarray(P, dtype=jnp.float64)
+    N_layers = P.shape[0]
 
-    i_set = int(np.argmin(np.abs(P - P_set)))
+    i_set = jnp.argmin(jnp.abs(P - P_set))
     P_set_i = P[i_set]
 
-    log_P = np.log10(P)
-    log_P_min = np.log10(np.min(P))
-    log_P_set_i = np.log10(P_set_i)
+    log_P = jnp.log10(P)
+    log_P_min = jnp.log10(jnp.min(P))
+    log_P_set_i = jnp.log10(P_set_i)
 
-    # Boundary temperatures determined by which layer contains P_set.
-    if log_P_set_i >= log_P3:
-        T3 = T_set
-        T2 = T3 - ((1.0 / a2) * (log_P3 - log_P2)) ** 2
-        T1 = T2 + ((1.0 / a2) * (log_P1 - log_P2)) ** 2
-        T0 = T1 - ((1.0 / a1) * (log_P1 - log_P_min)) ** 2
-    elif log_P_set_i >= log_P1:
-        T2 = T_set - ((1.0 / a2) * (log_P_set_i - log_P2)) ** 2
-        T1 = T2 + ((1.0 / a2) * (log_P1 - log_P2)) ** 2
-        T3 = T2 + ((1.0 / a2) * (log_P3 - log_P2)) ** 2
-        T0 = T1 - ((1.0 / a1) * (log_P1 - log_P_min)) ** 2
-    else:  # log_P_set_i < log_P1
-        T0 = T_set - ((1.0 / a1) * (log_P_set_i - log_P_min)) ** 2
-        T1 = T0 + ((1.0 / a1) * (log_P1 - log_P_min)) ** 2
-        T2 = T1 - ((1.0 / a2) * (log_P1 - log_P2)) ** 2
-        T3 = T2 + ((1.0 / a2) * (log_P3 - log_P2)) ** 2
+    # Branch A: log_P_set_i >= log_P3
+    T3_A = T_set
+    T2_A = T3_A - ((1.0 / a2) * (log_P3 - log_P2)) ** 2
+    T1_A = T2_A + ((1.0 / a2) * (log_P1 - log_P2)) ** 2
+    T0_A = T1_A - ((1.0 / a1) * (log_P1 - log_P_min)) ** 2
 
-    for i in range(N_layers):
-        if log_P[i] >= log_P3:
-            T[i, 0, 0] = T3
-        elif log_P[i] > log_P1 and log_P[i] < log_P3:
-            T[i, 0, 0] = T2 + ((1.0 / a2) * (log_P[i] - log_P2)) ** 2
-        else:  # log_P[i] <= log_P1
-            T[i, 0, 0] = T0 + ((1.0 / a1) * (log_P[i] - log_P_min)) ** 2
+    # Branch B: log_P_set_i >= log_P1 (and < log_P3)
+    T2_B = T_set - ((1.0 / a2) * (log_P_set_i - log_P2)) ** 2
+    T1_B = T2_B + ((1.0 / a2) * (log_P1 - log_P2)) ** 2
+    T3_B = T2_B + ((1.0 / a2) * (log_P3 - log_P2)) ** 2
+    T0_B = T1_B - ((1.0 / a1) * (log_P1 - log_P_min)) ** 2
 
-    return T
+    # Branch C: log_P_set_i < log_P1
+    T0_C = T_set - ((1.0 / a1) * (log_P_set_i - log_P_min)) ** 2
+    T1_C = T0_C + ((1.0 / a1) * (log_P1 - log_P_min)) ** 2
+    T2_C = T1_C - ((1.0 / a2) * (log_P1 - log_P2)) ** 2
+    T3_C = T2_C + ((1.0 / a2) * (log_P3 - log_P2)) ** 2
+
+    is_A = log_P_set_i >= log_P3
+    is_B = (~is_A) & (log_P_set_i >= log_P1)
+    # else: branch C
+    T0 = jnp.where(is_A, T0_A, jnp.where(is_B, T0_B, T0_C))
+    T2 = jnp.where(is_A, T2_A, jnp.where(is_B, T2_B, T2_C))
+    T3 = jnp.where(is_A, T3_A, jnp.where(is_B, T3_B, T3_C))
+
+    # Per-layer profile (vectorised):
+    T_top = T3
+    T_mid = T2 + ((1.0 / a2) * (log_P - log_P2)) ** 2
+    T_low = T0 + ((1.0 / a1) * (log_P - log_P_min)) ** 2
+    is_top = log_P >= log_P3
+    is_strict_mid = (log_P > log_P1) & (log_P < log_P3)
+    T_per_layer = jnp.where(is_top, T_top, jnp.where(is_strict_mid, T_mid, T_low))
+    return T_per_layer.reshape(N_layers, 1, 1)
 
 
 def compute_T_Madhu_2D(
@@ -187,12 +199,31 @@ def compute_T_Madhu_2D(
 def gauss_conv(arr, sigma=3, axis=0, mode="nearest"):
     """Gaussian-smooth `arr` along `axis`, matching POSEIDON's scipy call.
 
-    POSEIDON does `from scipy.ndimage import gaussian_filter1d as gauss_conv`
+    POSEIDON imports scipy.ndimage.gaussian_filter1d as gauss_conv
     (`POSEIDON/atmosphere.py:9`) and applies it as
     `gauss_conv(T_rough, sigma=3, axis=0, mode='nearest')` for Madhu/gradient
     profiles. Defaults match.
+
+    v1-B: backed by `_jax_filters.gaussian_filter1d_edge`. Applies along
+    `axis=0` only (POSEIDON only ever passes `axis=0`); other axes are
+    not used by POSEIDON.
     """
-    return gaussian_filter1d(arr, sigma=sigma, axis=axis, mode=mode)
+    if mode != "nearest":
+        raise NotImplementedError(
+            f"gauss_conv mode={mode!r} not in POSEIDON usage (only 'nearest')"
+        )
+    arr_j = jnp.asarray(arr, dtype=jnp.float64)
+    if axis != 0:
+        arr_j = jnp.moveaxis(arr_j, axis, 0)
+    orig_shape = arr_j.shape
+    flat = arr_j.reshape(orig_shape[0], -1)
+    cols = [
+        gaussian_filter1d_edge(flat[:, c], float(sigma)) for c in range(flat.shape[1])
+    ]
+    out = jnp.stack(cols, axis=1).reshape(orig_shape)
+    if axis != 0:
+        out = jnp.moveaxis(out, 0, axis)
+    return out
 
 
 def compute_T_slope(
@@ -205,30 +236,34 @@ def compute_T_slope(
     """1D Piette & Madhusudhan (2021) `slope` P-T profile.
 
     Bit-equivalent port of POSEIDON `atmosphere.py:232-299`. PCHIP
-    interpolation over (log_P_points, T_points).
+    interpolation over (log_P_points, T_points). The `log_P_phot` and
+    `log_P_arr` are kwargs (Python-static); `prior_index(log_P_phot,
+    log_P_arr)` resolves at trace time and the loop unrolls.
     """
-    N_layers = len(P)
-    log_P_arr = np.asarray(log_P_arr)
-    T_points = np.zeros(len(log_P_arr) + 1)
-    log_P_points = np.sort(np.append(log_P_arr, log_P_phot))
-    N_T_points = len(T_points)
+    P = jnp.asarray(P, dtype=jnp.float64)
+    Delta_T_arr = jnp.asarray(Delta_T_arr, dtype=jnp.float64)
+    N_layers = P.shape[0]
+    log_P_arr_np = np.asarray(log_P_arr)
+    log_P_points = np.sort(np.append(log_P_arr_np, log_P_phot))
+    N_T_points = len(log_P_points)
 
-    i_phot = prior_index(log_P_phot, log_P_arr, 0)
+    i_phot = prior_index(log_P_phot, log_P_arr_np, 0)
 
+    T_points_list = []
     for i in range(0, i_phot + 1):
         if i == 0:
-            T_points[i] = T_phot - np.sum(Delta_T_arr[i_phot::-1])
+            T_points_list.append(T_phot - jnp.sum(Delta_T_arr[i_phot::-1]))
         else:
-            T_points[i] = T_phot - np.sum(Delta_T_arr[i_phot : i - 1 : -1])
-
-    T_points[i_phot + 1] = T_phot
-
+            T_points_list.append(T_phot - jnp.sum(Delta_T_arr[i_phot : i - 1 : -1]))
+    T_points_list.append(jnp.asarray(T_phot, dtype=jnp.float64))
     for i in range(i_phot + 2, N_T_points):
-        T_points[i] = T_phot + np.sum(Delta_T_arr[i_phot + 1 : i])
+        T_points_list.append(T_phot + jnp.sum(Delta_T_arr[i_phot + 1 : i]))
+    T_points = jnp.stack([jnp.asarray(x, dtype=jnp.float64) for x in T_points_list])
 
-    T = np.zeros(shape=(N_layers, 1, 1))
-    T[:, 0, 0] = pchip_interpolate(log_P_points, T_points, np.log10(P))
-    return T
+    T_flat = pchip_interpolate(
+        jnp.asarray(log_P_points, dtype=jnp.float64), T_points, jnp.log10(P)
+    )
+    return T_flat.reshape(N_layers, 1, 1)
 
 
 def compute_T_Pelletier(P, T_points):
@@ -238,14 +273,16 @@ def compute_T_Pelletier(P, T_points):
     interpolation between knots evenly spaced in log-pressure between
     `min(log10 P)` and `max(log10 P)`.
     """
-    N_layers = len(P)
-    P_min = np.min(np.log10(P))
-    P_max = np.max(np.log10(P))
-    number_P_knots = len(T_points)
-    log_P_points = np.linspace(P_min, P_max, num=number_P_knots)
-    T = np.zeros(shape=(N_layers, 1, 1))
-    T[:, 0, 0] = pchip_interpolate(log_P_points, T_points, np.log10(P))
-    return T
+    P = jnp.asarray(P, dtype=jnp.float64)
+    T_points = jnp.asarray(T_points, dtype=jnp.float64)
+    N_layers = P.shape[0]
+    log_P = jnp.log10(P)
+    P_min = jnp.min(log_P)
+    P_max = jnp.max(log_P)
+    number_P_knots = T_points.shape[0]
+    log_P_points = jnp.linspace(P_min, P_max, num=number_P_knots)
+    T_flat = pchip_interpolate(log_P_points, T_points, log_P)
+    return T_flat.reshape(N_layers, 1, 1)
 
 
 def compute_T_Guillot(P, g, log_kappa_IR, log_gamma, T_int, T_equ):
@@ -253,13 +290,13 @@ def compute_T_Guillot(P, g, log_kappa_IR, log_gamma, T_int, T_equ):
 
     Bit-equivalent port of POSEIDON `atmosphere.py:344-402`.
     """
-    kappa_IR = np.power(10, log_kappa_IR)
-    gamma = np.power(10, log_gamma)
+    P = jnp.asarray(P, dtype=jnp.float64)
+    kappa_IR = jnp.power(10.0, log_kappa_IR)
+    gamma = jnp.power(10.0, log_gamma)
     tau = ((P * 1e6) * kappa_IR) / g
-    T_irr = T_equ * np.sqrt(2.0)
-    N_layers = len(P)
-    T = np.zeros(shape=(N_layers, 1, 1))
-    T[:, 0, 0] = (
+    T_irr = T_equ * jnp.sqrt(2.0)
+    N_layers = P.shape[0]
+    T_flat = (
         0.75 * T_int**4.0 * (2.0 / 3.0 + tau)
         + 0.75
         * T_irr**4.0
@@ -268,10 +305,10 @@ def compute_T_Guillot(P, g, log_kappa_IR, log_gamma, T_int, T_equ):
             2.0 / 3.0
             + 1.0 / gamma / 3.0**0.5
             + (gamma / 3.0**0.5 - 1.0 / 3.0**0.5 / gamma)
-            * np.exp(-gamma * tau * 3.0**0.5)
+            * jnp.exp(-gamma * tau * 3.0**0.5)
         )
     ) ** 0.25
-    return T
+    return T_flat.reshape(N_layers, 1, 1)
 
 
 def compute_T_Guillot_dayside(P, g, log_kappa_IR, log_gamma, T_int, T_equ):
@@ -279,13 +316,13 @@ def compute_T_Guillot_dayside(P, g, log_kappa_IR, log_gamma, T_int, T_equ):
 
     Bit-equivalent port of POSEIDON `atmosphere.py:405-462`.
     """
-    kappa_IR = np.power(10, log_kappa_IR)
-    gamma = np.power(10, log_gamma)
+    P = jnp.asarray(P, dtype=jnp.float64)
+    kappa_IR = jnp.power(10.0, log_kappa_IR)
+    gamma = jnp.power(10.0, log_gamma)
     tau = ((P * 1e6) * kappa_IR) / g
-    T_irr = T_equ * np.sqrt(2.0)
-    N_layers = len(P)
-    T = np.zeros(shape=(N_layers, 1, 1))
-    T[:, 0, 0] = (
+    T_irr = T_equ * jnp.sqrt(2.0)
+    N_layers = P.shape[0]
+    T_flat = (
         0.75 * T_int**4.0 * (2.0 / 3.0 + tau)
         + 0.75
         * T_irr**4.0
@@ -294,10 +331,10 @@ def compute_T_Guillot_dayside(P, g, log_kappa_IR, log_gamma, T_int, T_equ):
             2.0 / 3.0
             + 1.0 / gamma / 3.0**0.5
             + (gamma / 3.0**0.5 - 1.0 / 3.0**0.5 / gamma)
-            * np.exp(-gamma * tau * 3.0**0.5)
+            * jnp.exp(-gamma * tau * 3.0**0.5)
         )
     ) ** 0.25
-    return T
+    return T_flat.reshape(N_layers, 1, 1)
 
 
 def compute_T_Line(
@@ -308,13 +345,13 @@ def compute_T_Line(
     Bit-equivalent port of POSEIDON `atmosphere.py:465-532` (PLATON
     `set_from_radiative_solution` form, eqns 13-16 of Line+13).
     """
-    kappa_IR = np.power(10, log_kappa_IR)
-    gamma = np.power(10, log_gamma)
-    gamma2 = np.power(10, log_gamma_2)
+    P = jnp.asarray(P, dtype=jnp.float64)
+    kappa_IR = jnp.power(10.0, log_kappa_IR)
+    gamma = jnp.power(10.0, log_gamma)
+    gamma2 = jnp.power(10.0, log_gamma_2)
     T_irr = beta * T_eq
     tau = ((P * 1e6) * kappa_IR) / g
-    N_layers = len(P)
-    T = np.zeros(shape=(N_layers, 1, 1))
+    N_layers = P.shape[0]
 
     def incoming(gam):
         return (
@@ -323,17 +360,17 @@ def compute_T_Line(
             * T_irr**4
             * (
                 2.0 / 3
-                + 2.0 / 3 / gam * (1 + (gam * tau / 2 - 1) * np.exp(-gam * tau))
-                + 2.0 * gam / 3 * (1 - tau**2 / 2) * scipy.special.expn(2, gam * tau)
+                + 2.0 / 3 / gam * (1 + (gam * tau / 2 - 1) * jnp.exp(-gam * tau))
+                + 2.0 * gam / 3 * (1 - tau**2 / 2) * expn_2(gam * tau)
             )
         )
 
     e1 = incoming(gamma)
     e2 = incoming(gamma2)
-    T[:, 0, 0] = (
+    T_flat = (
         3.0 / 4 * T_int**4 * (2.0 / 3 + tau) + (1 - alpha) * e1 + alpha * e2
     ) ** 0.25
-    return T
+    return T_flat.reshape(N_layers, 1, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -888,69 +925,123 @@ def compute_mean_mol_mass(P, X, N_species, N_sectors, N_zones, masses_all):
 # ---------------------------------------------------------------------------
 # Radial profiles (hydrostatic)
 # ---------------------------------------------------------------------------
+def _radial_column(P, T_col, mu_col, g_0, R_p, P_ref, R_p_ref, constant_g=False):
+    """Single-(sector, zone) hydrostatic radius integral.
+
+    Computes (n, r, r_up, r_low, dr) for one (j, k) atmospheric column.
+    Used by both `radial_profiles` (inverse-square gravity) and
+    `radial_profiles_constant_g`.
+    """
+    N_layers = P.shape[0]
+    log_P = jnp.log(P)
+    n = (P * 1.0e5) / (sc.k * T_col)
+    if constant_g:
+        integrand = (sc.k * T_col) / (g_0 * mu_col)
+    else:
+        integrand = (sc.k * T_col) / (R_p**2 * g_0 * mu_col)
+
+    i_ref = jnp.argmin(jnp.abs(P - P_ref))
+
+    # Forward cumulative trapezoid from i_ref+1 onward.
+    delta = 0.5 * (integrand[1:] + integrand[:-1]) * (log_P[1:] - log_P[:-1])
+    # Add zero at position 0 to align as "increment from layer i-1 to i".
+    delta_padded = jnp.concatenate([jnp.zeros(1, dtype=delta.dtype), delta])
+    # Outward integral: cumulative sum forward, taking layers > i_ref.
+    cum_fwd = jnp.cumsum(delta_padded)
+    # Inward integral: cumulative sum backward.
+    # integral_in[i] = sum_{m=i_ref-1 down to i} 0.5*(integrand[m]+integrand[m+1])*(log_P[m]-log_P[m+1])
+    delta_in = 0.5 * (integrand[:-1] + integrand[1:]) * (log_P[:-1] - log_P[1:])
+    delta_in_padded = jnp.concatenate([delta_in, jnp.zeros(1, dtype=delta.dtype)])
+    cum_in = jnp.cumsum(delta_in_padded[::-1])[::-1]
+
+    # cum_fwd[i_ref] = sum_{m=1..i_ref}, but we want integral_out at i =
+    # sum_{m=i_ref+1..i}. Compute via cum_fwd - cum_fwd[i_ref].
+    integral_out = cum_fwd - cum_fwd[i_ref]
+    # cum_in[i] = sum from i to N-2. integral_in at i = sum from
+    # m=i to i_ref-1 = cum_in[i] - cum_in[i_ref].
+    integral_in = cum_in - cum_in[i_ref]
+
+    idx = jnp.arange(N_layers)
+    if constant_g:
+        r_out = R_p_ref - integral_out
+        r_in = R_p_ref - integral_in
+    else:
+        r_out = 1.0 / ((1.0 / R_p_ref) + integral_out)
+        r_in = 1.0 / ((1.0 / R_p_ref) + integral_in)
+    r = jnp.where(idx > i_ref, r_out, jnp.where(idx < i_ref, r_in, R_p_ref))
+
+    # Layer-boundary radii and thicknesses.
+    r_up_mid = 0.5 * (r[2:] + r[1:-1])
+    r_low_mid = 0.5 * (r[1:-1] + r[:-2])
+    dr_mid = 0.5 * (r[2:] - r[:-2])
+
+    r_up_0 = 0.5 * (r[1] + r[0])
+    r_up_last = r[-1] + 0.5 * (r[-1] - r[-2])
+    r_low_0 = r[0] - 0.5 * (r[1] - r[0])
+    r_low_last = 0.5 * (r[-1] + r[-2])
+    dr_0 = r[1] - r[0]
+    dr_last = r[-1] - r[-2]
+
+    r_up = jnp.concatenate(
+        [jnp.atleast_1d(r_up_0), r_up_mid, jnp.atleast_1d(r_up_last)]
+    )
+    r_low = jnp.concatenate(
+        [jnp.atleast_1d(r_low_0), r_low_mid, jnp.atleast_1d(r_low_last)]
+    )
+    dr = jnp.concatenate([jnp.atleast_1d(dr_0), dr_mid, jnp.atleast_1d(dr_last)])
+    return n, r, r_up, r_low, dr
+
+
 def radial_profiles(P, T, g_0, R_p, P_ref, R_p_ref, mu, N_sectors, N_zones):
     """Inverse-square-gravity hydrostatic radius profile.
 
-    Mirrors `POSEIDON/atmosphere.py:1494-1606` (analytic trapezoidal
-    integral with 1/(1/r_0 + ∫H dlnP) form, NOT iterative).
-
-    POSEIDON's @jit numba broadcasts size-1 axes silently on `T[:, j, k]`;
-    numpy does not. To match parity, broadcast T to the full sector/zone
-    grid when caller supplies a 1D PT field.
+    Mirrors `POSEIDON/atmosphere.py:1494-1606`. Outer (j, k) loops
+    unroll at trace time (static `N_sectors`, `N_zones`); per-column
+    integral is vectorised via `_radial_column` (jit-traceable).
     """
-    N_layers = len(P)
+    P = jnp.asarray(P, dtype=jnp.float64)
+    T = jnp.asarray(T, dtype=jnp.float64)
+    mu = jnp.asarray(mu, dtype=jnp.float64)
+    N_layers = P.shape[0]
     if T.shape != (N_layers, N_sectors, N_zones):
-        T = np.broadcast_to(T, (N_layers, N_sectors, N_zones))
+        T = jnp.broadcast_to(T, (N_layers, N_sectors, N_zones))
     if mu.shape != (N_layers, N_sectors, N_zones):
-        mu = np.broadcast_to(mu, (N_layers, N_sectors, N_zones))
-    r = np.zeros((N_layers, N_sectors, N_zones))
-    r_up = np.zeros((N_layers, N_sectors, N_zones))
-    r_low = np.zeros((N_layers, N_sectors, N_zones))
-    dr = np.zeros((N_layers, N_sectors, N_zones))
-    n = np.zeros((N_layers, N_sectors, N_zones))
-    log_P = np.log(P)
+        mu = jnp.broadcast_to(mu, (N_layers, N_sectors, N_zones))
 
+    n_list = []
+    r_list = []
+    r_up_list = []
+    r_low_list = []
+    dr_list = []
     for j in range(N_sectors):
         for k in range(N_zones):
-            n[:, j, k] = (P * 1.0e5) / (sc.k * T[:, j, k])
-            P_0 = P_ref
-            r_0 = R_p_ref
-            i_ref = int(np.argmin(np.abs(P - P_0)))
-            r[i_ref, j, k] = r_0
-            integrand = (sc.k * T[:, j, k]) / (R_p**2 * g_0 * mu[:, j, k])
-
-            integral_out = 0.0
-            integral_in = 0.0
-
-            for i in range(i_ref + 1, N_layers):
-                integral_out += (
-                    0.5 * (integrand[i] + integrand[i - 1]) * (log_P[i] - log_P[i - 1])
-                )
-                r[i, j, k] = 1.0 / ((1.0 / r_0) + integral_out)
-
-            for i in range(i_ref - 1, -1, -1):
-                integral_in += (
-                    0.5 * (integrand[i] + integrand[i + 1]) * (log_P[i] - log_P[i + 1])
-                )
-                r[i, j, k] = 1.0 / ((1.0 / r_0) + integral_in)
-
-            for i in range(1, N_layers - 1):
-                r_up[i, j, k] = 0.5 * (r[i + 1, j, k] + r[i, j, k])
-                r_low[i, j, k] = 0.5 * (r[i, j, k] + r[i - 1, j, k])
-                dr[i, j, k] = 0.5 * (r[i + 1, j, k] - r[i - 1, j, k])
-
-            r_up[0, j, k] = 0.5 * (r[1, j, k] + r[0, j, k])
-            r_up[N_layers - 1, j, k] = r[N_layers - 1, j, k] + 0.5 * (
-                r[N_layers - 1, j, k] - r[N_layers - 2, j, k]
+            ncol, rcol, rup, rlow, drcol = _radial_column(
+                P,
+                T[:, j, k],
+                mu[:, j, k],
+                g_0,
+                R_p,
+                P_ref,
+                R_p_ref,
+                constant_g=False,
             )
-            r_low[0, j, k] = r[0, j, k] - 0.5 * (r[1, j, k] - r[0, j, k])
-            r_low[N_layers - 1, j, k] = 0.5 * (
-                r[N_layers - 1, j, k] + r[N_layers - 2, j, k]
-            )
-            dr[0, j, k] = r[1, j, k] - r[0, j, k]
-            dr[N_layers - 1, j, k] = r[N_layers - 1, j, k] - r[N_layers - 2, j, k]
+            n_list.append(ncol)
+            r_list.append(rcol)
+            r_up_list.append(rup)
+            r_low_list.append(rlow)
+            dr_list.append(drcol)
 
-    return n, r, r_up, r_low, dr
+    def _stack(lst):
+        out = jnp.stack(lst, axis=-1)
+        return out.reshape(N_layers, N_sectors, N_zones)
+
+    return (
+        _stack(n_list),
+        _stack(r_list),
+        _stack(r_up_list),
+        _stack(r_low_list),
+        _stack(dr_list),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -959,7 +1050,7 @@ def radial_profiles(P, T, g_0, R_p, P_ref, R_p_ref, mu, N_sectors, N_zones):
 # POSEIDON `supported_chemicals.inactive_species` — sourced from the local
 # build-time-extracted `_species_data.inactive_species` so the runtime
 # forward path is independent of POSEIDON's importability.
-_INACTIVE_SPECIES = _INACTIVE_SPECIES_LOCAL
+_INACTIVE_SPECIES = _INACT
 
 
 def mixing_ratio_categories(
@@ -1018,62 +1109,52 @@ def mixing_ratio_categories(
 def radial_profiles_constant_g(P, T, g_0, P_ref, R_p_ref, mu, N_sectors, N_zones):
     """Constant-gravity hydrostatic radius profile.
 
-    Mirrors `POSEIDON/atmosphere.py:1609-1722`. Same numba-broadcast
-    workaround as `radial_profiles` (see its docstring).
+    Mirrors `POSEIDON/atmosphere.py:1609-1722`. Implementation shares
+    `_radial_column` with `radial_profiles` via `constant_g=True`.
     """
-    N_layers = len(P)
+    P = jnp.asarray(P, dtype=jnp.float64)
+    T = jnp.asarray(T, dtype=jnp.float64)
+    mu = jnp.asarray(mu, dtype=jnp.float64)
+    N_layers = P.shape[0]
     if T.shape != (N_layers, N_sectors, N_zones):
-        T = np.broadcast_to(T, (N_layers, N_sectors, N_zones))
+        T = jnp.broadcast_to(T, (N_layers, N_sectors, N_zones))
     if mu.shape != (N_layers, N_sectors, N_zones):
-        mu = np.broadcast_to(mu, (N_layers, N_sectors, N_zones))
-    r = np.zeros((N_layers, N_sectors, N_zones))
-    r_up = np.zeros((N_layers, N_sectors, N_zones))
-    r_low = np.zeros((N_layers, N_sectors, N_zones))
-    dr = np.zeros((N_layers, N_sectors, N_zones))
-    n = np.zeros((N_layers, N_sectors, N_zones))
-    log_P = np.log(P)
+        mu = jnp.broadcast_to(mu, (N_layers, N_sectors, N_zones))
 
+    n_list = []
+    r_list = []
+    r_up_list = []
+    r_low_list = []
+    dr_list = []
     for j in range(N_sectors):
         for k in range(N_zones):
-            n[:, j, k] = (P * 1.0e5) / (sc.k * T[:, j, k])
-            P_0 = P_ref
-            r_0 = R_p_ref
-            i_ref = int(np.argmin(np.abs(P - P_0)))
-            r[i_ref, j, k] = r_0
-
-            integral_out = 0.0
-            integral_in = 0.0
-            integrand = (sc.k * T[:, j, k]) / (g_0 * mu[:, j, k])
-
-            for i in range(i_ref + 1, N_layers):
-                integral_out += (
-                    0.5 * (integrand[i] + integrand[i - 1]) * (log_P[i] - log_P[i - 1])
-                )
-                r[i, j, k] = r_0 - integral_out
-
-            for i in range(i_ref - 1, -1, -1):
-                integral_in += (
-                    0.5 * (integrand[i] + integrand[i + 1]) * (log_P[i] - log_P[i + 1])
-                )
-                r[i, j, k] = r_0 - integral_in
-
-            for i in range(1, N_layers - 1):
-                r_up[i, j, k] = 0.5 * (r[i + 1, j, k] + r[i, j, k])
-                r_low[i, j, k] = 0.5 * (r[i, j, k] + r[i - 1, j, k])
-                dr[i, j, k] = 0.5 * (r[i + 1, j, k] - r[i - 1, j, k])
-
-            r_up[0, j, k] = 0.5 * (r[1, j, k] + r[0, j, k])
-            r_up[N_layers - 1, j, k] = r[N_layers - 1, j, k] + 0.5 * (
-                r[N_layers - 1, j, k] - r[N_layers - 2, j, k]
+            ncol, rcol, rup, rlow, drcol = _radial_column(
+                P,
+                T[:, j, k],
+                mu[:, j, k],
+                g_0,
+                0.0,
+                P_ref,
+                R_p_ref,
+                constant_g=True,
             )
-            r_low[0, j, k] = r[0, j, k] - 0.5 * (r[1, j, k] - r[0, j, k])
-            r_low[N_layers - 1, j, k] = 0.5 * (
-                r[N_layers - 1, j, k] + r[N_layers - 2, j, k]
-            )
-            dr[0, j, k] = r[1, j, k] - r[0, j, k]
-            dr[N_layers - 1, j, k] = r[N_layers - 1, j, k] - r[N_layers - 2, j, k]
+            n_list.append(ncol)
+            r_list.append(rcol)
+            r_up_list.append(rup)
+            r_low_list.append(rlow)
+            dr_list.append(drcol)
 
-    return n, r, r_up, r_low, dr
+    def _stack(lst):
+        out = jnp.stack(lst, axis=-1)
+        return out.reshape(N_layers, N_sectors, N_zones)
+
+    return (
+        _stack(n_list),
+        _stack(r_list),
+        _stack(r_up_list),
+        _stack(r_low_list),
+        _stack(dr_list),
+    )
 
 
 # ---------------------------------------------------------------------------

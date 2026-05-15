@@ -4,24 +4,37 @@ Faithful port of the v0 subset of POSEIDON `absorption.py:1034-1227`
 (`extinction(...)`). Mirrors POSEIDON's nearest-fine-grid lookup in
 (log_P, T) and the MacMad17 deck + haze additions.
 
-v0 envelope:
-- enable_haze in {0, 1}
-- enable_deck in {0, 1}
-- enable_surface = 0 (deferred)
-- enable_Mie in {0, 1} (Phase 0.5.12b)
-- N_ff_pairs = 0 (H-minus deferred)
-- N_bf_species = 0 (H-minus deferred)
-- ff_stored, bf_stored may be supplied but ignored
-- N_sectors = N_zones = 1 (1D atmosphere)
+v1-B: rewritten in `jax.numpy` with `jnp.where`-based masking over
+the `i_bot:N_layers` slice so the function is jit-traceable. The
+outer (`j`, `k`) sector/zone Python loops unroll at trace time
+(static loop bounds from input shapes); per-layer accumulation uses
+broadcasted vectorisation.
 
-CIA and active-species opacity are the heaviest branches and are ported
-in full. The output 4-tuple matches POSEIDON's:
+v0 envelope:
+- enable_haze, enable_deck, enable_surface, enable_Mie in {0, 1}
+  (Python-static integers passed as static arguments to jit)
+- N_ff_pairs, N_bf_species derived from `ff_pairs`/`bf_species`
+  static lengths
+- N_sectors = N_zones = 1 for the K2-18b use case (multi-(j, k)
+  loops unroll at trace time when needed)
+
+CIA and active-species opacity are the heaviest branches and are
+ported in full. The output 4-tuple matches POSEIDON's:
     (kappa_gas, kappa_Ray, kappa_cloud, kappa_cloud_separate)
 """
 
-import numpy as np
+import jax
 
-from jaxposeidon._opacity_precompute import closest_index
+jax.config.update("jax_enable_x64", True)
+
+import jax.numpy as jnp  # noqa: E402
+
+from jaxposeidon._opacity_precompute import (  # noqa: E402
+    closest_index,
+    closest_index_jax,
+)
+
+__all__ = ["extinction", "closest_index"]
 
 
 def extinction(
@@ -66,12 +79,7 @@ def extinction(
 
     Bit-exact port of POSEIDON `absorption.py:1034-1227` for the v0
     envelope plus the Phase 0.5.13d surface branch and Phase 0.5.12b
-    Mie aerosol branches. H-minus ff/bf opacity is ported in
-    Phase 0.5.4: ``ff_pairs`` / ``bf_species`` non-empty are accepted
-    and processed via the precomputed ``ff_stored`` / ``bf_stored``
-    arrays (built by POSEIDON's ``opacity_tables(...)`` using
-    ``_h_minus.H_minus_free_free`` and ``_h_minus.H_minus_bound_free``
-    once the read_opacities port lifts the POSEIDON delegation).
+    Mie aerosol branches.
     """
     N_species = len(chemical_species)
     N_species_active = len(active_species)
@@ -81,102 +89,151 @@ def extinction(
     N_wl = len(wl)
     N_layers = len(P)
 
-    kappa_gas = np.zeros((N_layers, N_sectors, N_zones, N_wl))
-    kappa_Ray = np.zeros((N_layers, N_sectors, N_zones, N_wl))
-    kappa_cloud = np.zeros((N_layers, N_sectors, N_zones, N_wl))
-    kappa_cloud_separate = np.zeros(
-        (len(n_aerosol_array), N_layers, N_sectors, N_zones, N_wl)
-    )
+    T = jnp.asarray(T, dtype=jnp.float64)
+    n = jnp.asarray(n, dtype=jnp.float64)
+    P = jnp.asarray(P, dtype=jnp.float64)
+    wl = jnp.asarray(wl, dtype=jnp.float64)
+    X = jnp.asarray(X, dtype=jnp.float64)
+    X_active = jnp.asarray(X_active, dtype=jnp.float64)
+    X_cia = jnp.asarray(X_cia, dtype=jnp.float64)
+    X_ff = jnp.asarray(X_ff, dtype=jnp.float64)
+    X_bf = jnp.asarray(X_bf, dtype=jnp.float64)
+    sigma_stored = jnp.asarray(sigma_stored, dtype=jnp.float64)
+    cia_stored = jnp.asarray(cia_stored, dtype=jnp.float64)
+    Rayleigh_stored = jnp.asarray(Rayleigh_stored, dtype=jnp.float64)
+    if N_ff_pairs > 0:
+        ff_stored = jnp.asarray(ff_stored, dtype=jnp.float64)
+    if N_bf_species > 0:
+        bf_stored = jnp.asarray(bf_stored, dtype=jnp.float64)
 
     N_T_fine = len(T_fine)
     N_P_fine = len(log_P_fine)
+    T_fine_start = float(T_fine[0])
+    T_fine_end = float(T_fine[-1])
+    log_P_fine_start = float(log_P_fine[0])
+    log_P_fine_end = float(log_P_fine[-1])
 
-    i_bot = int(np.argmin(np.abs(P - P_deep)))
+    i_bot_data = jnp.argmin(jnp.abs(P - P_deep))
+    layer_idx = jnp.arange(N_layers)
+    layer_mask = layer_idx >= i_bot_data  # (N_layers,)
+
+    P_arr = jnp.asarray(P_cloud, dtype=jnp.float64)
+
+    kappa_gas = jnp.zeros((N_layers, N_sectors, N_zones, N_wl), dtype=jnp.float64)
+    kappa_Ray = jnp.zeros((N_layers, N_sectors, N_zones, N_wl), dtype=jnp.float64)
+    kappa_cloud = jnp.zeros((N_layers, N_sectors, N_zones, N_wl), dtype=jnp.float64)
+    N_aer = len(n_aerosol_array) if enable_Mie == 1 else 0
+    kappa_cloud_separate = jnp.zeros(
+        (N_aer, N_layers, N_sectors, N_zones, N_wl), dtype=jnp.float64
+    )
 
     if enable_haze == 1:
-        slope = np.power(wl / 0.35, gamma)
+        slope = jnp.power(wl / 0.35, gamma)
+
+    log_P = jnp.log10(P)
+
+    def _idx_T(T_jk):
+        return closest_index_jax(T_jk, T_fine_start, T_fine_end, N_T_fine)
+
+    def _idx_P(log_P_i):
+        return closest_index_jax(log_P_i, log_P_fine_start, log_P_fine_end, N_P_fine)
 
     for j in range(N_sectors):
         for k in range(N_zones):
-            for i in range(i_bot, N_layers):
+            for i in range(N_layers):
                 n_level = n[i, j, k]
-                idx_T_fine = closest_index(T[i, j, k], T_fine[0], T_fine[-1], N_T_fine)
-                idx_P_fine = closest_index(
-                    np.log10(P[i]), log_P_fine[0], log_P_fine[-1], N_P_fine
-                )
+                idx_T_fine = _idx_T(T[i, j, k])
+                idx_P_fine = _idx_P(log_P[i])
+
+                contrib = jnp.zeros((N_wl,), dtype=jnp.float64)
 
                 if not disable_continuum:
                     for q in range(N_cia_pairs):
                         n_cia_1 = n_level * X_cia[0, q, i, j, k]
                         n_cia_2 = n_level * X_cia[1, q, i, j, k]
                         n_n_cia = n_cia_1 * n_cia_2
-                        kappa_gas[i, j, k, :] += n_n_cia * cia_stored[q, idx_T_fine, :]
+                        contrib = contrib + n_n_cia * cia_stored[q, idx_T_fine, :]
 
-                # H-minus free-free (POSEIDON absorption.py:1127-1137).
                 for q in range(N_ff_pairs):
                     n_ff_1 = n_level * X_ff[0, q, i, j, k]
                     n_ff_2 = n_level * X_ff[1, q, i, j, k]
                     n_n_ff = n_ff_1 * n_ff_2
-                    kappa_gas[i, j, k, :] += n_n_ff * ff_stored[q, idx_T_fine, :]
+                    contrib = contrib + n_n_ff * ff_stored[q, idx_T_fine, :]
 
-                # H-minus bound-free (POSEIDON absorption.py:1140-1148).
                 for q in range(N_bf_species):
                     n_q = n_level * X_bf[q, i, j, k]
-                    kappa_gas[i, j, k, :] += n_q * bf_stored[q, :]
+                    contrib = contrib + n_q * bf_stored[q, :]
 
                 for q in range(N_species_active):
                     n_q = n_level * X_active[q, i, j, k]
-                    kappa_gas[i, j, k, :] += (
+                    contrib = contrib + (
                         n_q * sigma_stored[q, idx_P_fine, idx_T_fine, :]
                     )
 
+                mask = layer_mask[i]
+                kappa_gas = kappa_gas.at[i, j, k, :].set(jnp.where(mask, contrib, 0.0))
+
                 if not disable_continuum:
+                    ray = jnp.zeros((N_wl,), dtype=jnp.float64)
                     for q in range(N_species):
                         n_q = n_level * X[q, i, j, k]
-                        kappa_Ray[i, j, k, :] += n_q * Rayleigh_stored[q, :]
+                        ray = ray + n_q * Rayleigh_stored[q, :]
+                    kappa_Ray = kappa_Ray.at[i, j, k, :].set(jnp.where(mask, ray, 0.0))
 
             if enable_haze == 1:
-                for i in range(i_bot, N_layers):
+                for i in range(N_layers):
                     haze_amp = n[i, j, k] * a * 5.31e-31
-                    kappa_cloud[i, j, k, :] += haze_amp * slope
+                    increment = haze_amp * slope
+                    kappa_cloud = kappa_cloud.at[i, j, k, :].add(
+                        jnp.where(layer_mask[i], increment, 0.0)
+                    )
 
             if enable_deck == 1:
-                kappa_cloud[P_cloud[0] < P, j, k, :] += kappa_cloud_0
+                deck_mask = P_arr[0] < P  # (N_layers,)
+                kappa_cloud = kappa_cloud.at[:, j, k, :].add(
+                    deck_mask[:, None].astype(jnp.float64) * kappa_cloud_0
+                )
 
             if enable_surface == 1:
-                kappa_gas[(P_surf < P), j, k, :] = 1.0e250
+                surf_mask = P_surf < P
+                kappa_gas = kappa_gas.at[:, j, k, :].set(
+                    jnp.where(surf_mask[:, None], 1.0e250, kappa_gas[:, j, k, :])
+                )
 
             if enable_Mie == 1:
-                # Port of POSEIDON `absorption.py:1199-1224`.
-                if len(n_aerosol_array) == len(sigma_Mie_array):
-                    for aer in range(len(n_aerosol_array)):
-                        for i in range(i_bot, N_layers):
-                            for q in range(len(wl)):
-                                kappa_cloud[i, j, k, q] += (
-                                    n_aerosol_array[aer][i, j, k]
-                                    * sigma_Mie_array[aer][q]
-                                )
-                                kappa_cloud_separate[aer, i, j, k, q] += (
-                                    n_aerosol_array[aer][i, j, k]
-                                    * sigma_Mie_array[aer][q]
-                                )
-                else:
-                    for aer in range(len(n_aerosol_array)):
-                        if aer == 0:
-                            kappa_cloud[(P_cloud[0] < P), j, k, :] += 1.0e250
-                            kappa_cloud_separate[aer, (P_cloud[0] < P), j, k, :] += (
-                                1.0e250
+                if N_aer == len(sigma_Mie_array):
+                    for aer in range(N_aer):
+                        n_aer = jnp.asarray(n_aerosol_array[aer], dtype=jnp.float64)
+                        sig_aer = jnp.asarray(sigma_Mie_array[aer], dtype=jnp.float64)
+                        for i in range(N_layers):
+                            inc = jnp.where(
+                                layer_mask[i], n_aer[i, j, k] * sig_aer, 0.0
                             )
+                            kappa_cloud = kappa_cloud.at[i, j, k, :].add(inc)
+                            kappa_cloud_separate = kappa_cloud_separate.at[
+                                aer, i, j, k, :
+                            ].add(inc)
+                else:
+                    for aer in range(N_aer):
+                        n_aer = jnp.asarray(n_aerosol_array[aer], dtype=jnp.float64)
+                        if aer == 0:
+                            deck_mask = P_arr[0] < P
+                            inc_deck = deck_mask[:, None].astype(jnp.float64) * 1.0e250
+                            kappa_cloud = kappa_cloud.at[:, j, k, :].add(inc_deck)
+                            kappa_cloud_separate = kappa_cloud_separate.at[
+                                aer, :, j, k, :
+                            ].add(inc_deck)
                         else:
-                            for i in range(i_bot, N_layers):
-                                for q in range(len(wl)):
-                                    kappa_cloud[i, j, k, q] += (
-                                        n_aerosol_array[aer][i, j, k]
-                                        * sigma_Mie_array[aer - 1][q]
-                                    )
-                                    kappa_cloud_separate[aer, i, j, k, q] += (
-                                        n_aerosol_array[aer][i, j, k]
-                                        * sigma_Mie_array[aer - 1][q]
-                                    )
+                            sig_aer = jnp.asarray(
+                                sigma_Mie_array[aer - 1], dtype=jnp.float64
+                            )
+                            for i in range(N_layers):
+                                inc = jnp.where(
+                                    layer_mask[i], n_aer[i, j, k] * sig_aer, 0.0
+                                )
+                                kappa_cloud = kappa_cloud.at[i, j, k, :].add(inc)
+                                kappa_cloud_separate = kappa_cloud_separate.at[
+                                    aer, i, j, k, :
+                                ].add(inc)
 
     return kappa_gas, kappa_Ray, kappa_cloud, kappa_cloud_separate
