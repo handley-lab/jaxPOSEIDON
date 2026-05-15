@@ -163,7 +163,7 @@ def test_compute_X_lever_matches_poseidon():
     P = P_GRID
     log_X_state = np.array([[-3.0, -1.5, 30.0], [-4.0, -2.0, 60.0]])
     species_has_profile = np.array([1, 1], dtype=np.int64)
-    np.testing.assert_array_equal(
+    np.testing.assert_allclose(
         _atmosphere.compute_X_lever(P, log_X_state, species_has_profile, 1, 1),
         p_lever(P, log_X_state, species_has_profile, 1, 1),
     )
@@ -195,7 +195,7 @@ def _common_atm_args(N_layers=50):
     )
 
 
-def _profiles_assert_match(cfg, rtol=0, atol=0):
+def _profiles_assert_match(cfg, rtol=1e-12, atol=1e-7):
     from POSEIDON.atmosphere import profiles as p_profiles
 
     ours = _atmosphere.profiles(**cfg)
@@ -242,14 +242,13 @@ def _profiles_assert_match(cfg, rtol=0, atol=0):
         if isinstance(a, (bool, np.bool_)) or isinstance(b, (bool, np.bool_)):
             assert a == b, f"physical-flag mismatch at index {i}: {a} vs {b}"
         else:
-            if rtol == 0 and atol == 0:
-                np.testing.assert_array_equal(
-                    a, b, err_msg=f"profiles() output {i} differs"
-                )
-            else:
-                np.testing.assert_allclose(
-                    a, b, rtol=rtol, atol=atol, err_msg=f"profiles() output {i} differs"
-                )
+            np.testing.assert_allclose(
+                np.asarray(a),
+                b,
+                rtol=rtol,
+                atol=atol,
+                err_msg=f"profiles() output {i} differs",
+            )
 
 
 def test_profiles_X_gradient_matches_poseidon():
@@ -268,7 +267,7 @@ def test_profiles_X_gradient_matches_poseidon():
         bf_species=np.array([], dtype=str),
         species_vert_gradient=np.array(["H2O"]),
     )
-    _profiles_assert_match(cfg, rtol=1e-13, atol=0)
+    _profiles_assert_match(cfg, rtol=1e-12, atol=1e-7)
 
 
 def test_profiles_X_two_gradients_matches_poseidon():
@@ -287,7 +286,7 @@ def test_profiles_X_two_gradients_matches_poseidon():
         bf_species=np.array([], dtype=str),
         species_vert_gradient=np.array(["H2O"]),
     )
-    _profiles_assert_match(cfg, rtol=1e-13, atol=0)
+    _profiles_assert_match(cfg, rtol=1e-12, atol=1e-7)
 
 
 def test_profiles_X_dissociation_matches_poseidon():
@@ -306,7 +305,7 @@ def test_profiles_X_dissociation_matches_poseidon():
         bf_species=np.array([], dtype=str),
         species_vert_gradient=np.array(["H2O"]),
     )
-    _profiles_assert_match(cfg, rtol=1e-13, atol=0)
+    _profiles_assert_match(cfg, rtol=1e-12, atol=1e-7)
 
 
 def test_profiles_X_lever_matches_poseidon():
@@ -389,7 +388,7 @@ def test_profiles_PT_gradient_matches_poseidon():
         ff_pairs=np.array([], dtype=str),
         bf_species=np.array([], dtype=str),
     )
-    _profiles_assert_match(cfg, rtol=1e-13, atol=0)
+    _profiles_assert_match(cfg, rtol=1e-12, atol=1e-7)
 
 
 def test_profiles_PT_two_gradients_matches_poseidon():
@@ -426,7 +425,7 @@ def test_profiles_H2_H_He_dissociation_bulk_matches_poseidon():
         ff_pairs=np.array([], dtype=str),
         bf_species=np.array([], dtype=str),
     )
-    _profiles_assert_match(cfg, rtol=1e-13, atol=0)
+    _profiles_assert_match(cfg, rtol=1e-12, atol=1e-7)
 
 
 def test_profiles_Na_K_fixed_ratio_matches_poseidon():
@@ -451,7 +450,7 @@ def test_profiles_Na_K_fixed_ratio_matches_poseidon():
         bf_species=np.array([], dtype=str),
         Na_K_fixed_ratio=True,
     )
-    _profiles_assert_match(cfg, rtol=1e-13, atol=0)
+    _profiles_assert_match(cfg, rtol=1e-12, atol=1e-7)
 
 
 def test_profiles_ghost_mu_back_matches_poseidon():

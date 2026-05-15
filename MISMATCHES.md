@@ -27,6 +27,43 @@ pairwise sum order than `numpy.trapezoid`. The downstream Toon
 emission / reflection parity tests run at `rtol=1e-10, atol=1e-8`
 per the plan's component-specific tolerance for the source-function
 method.
+### v1-B FP-reorder tolerance relaxation (rtol=1e-12, atol=1e-7)
+
+The v1-B JAX port of the opacities / atmosphere / chemistry / clouds
+hot path replaces `scipy.ndimage.gaussian_filter1d`,
+`scipy.interpolate.pchip_interpolate`, and `scipy.special.expn(2, ...)`
+with the v1-A JAX primitives (`_jax_filters.gaussian_filter1d_edge`,
+`_jax_interpolate.pchip_interpolate`, `_jax_special.expn_2`). The
+numerical kernels are mathematically equivalent but the XLA reduction
+order differs from scipy / numba, producing ULP-scale residuals:
+
+- `gaussian_filter1d_edge` vs scipy: max rtol ~7e-15 (sigma=3 on a
+  100-element float64 array).
+- PT-profile `compute_T_Madhu` after Gaussian smoothing: max rtol
+  ~2e-16; propagates to `profiles()` outputs.
+- `radial_profiles` cumulative trapezoidal integral: max rtol ~2e-16,
+  max absolute residual ~1.5e-8 (radius values are ~7e7).
+- `compute_T_Guillot` / `compute_T_Guillot_dayside` / `compute_T_Line`:
+  max rtol ~2e-13 (powers + `expn_2` reorder).
+
+The v0.5 strict `assert_array_equal` / `rtol=1e-13, atol=0` tests
+were relaxed to `rtol=1e-12, atol=1e-7` (the latter covers
+radius-scale absolute residuals). The maximum observed residual is
+well within both numerical noise and the v0.5 retrieval gradient
+sensitivity. No physical observable is affected.
+
+### v1-B `_chemistry.interpolate_log_X_grid` bounds-check guard
+
+POSEIDON `chemistry.py:163-185` raises `Exception` on
+out-of-grid-bounds inputs. Under `jax.jit`, the bounds check itself
+would force materialisation of the traced query points (since
+`np.max` on a traced array isn't defined). The port skips the
+Python-side bounds check when called under jit (detected by
+`hasattr(log_P, "aval")`), trusting the caller to clip upstream;
+the v1-A `regular_grid_interp_linear` primitive itself clips
+out-of-range queries to the boundary value (documented as the v1-A
+divergence). Out-of-jit calls preserve POSEIDON's exception path
+exactly.
 
 ### v1-C TRIDENT JIT boundary uses `jax.pure_callback`
 

@@ -101,7 +101,7 @@ def test_compute_T_Madhu_matches_poseidon():
         args["T_set"],
         args["P_set"],
     )
-    np.testing.assert_array_equal(T_ours, T_theirs)
+    np.testing.assert_allclose(np.asarray(T_ours), T_theirs, rtol=1e-13, atol=1e-15)
 
 
 @pytest.mark.parametrize(
@@ -172,17 +172,23 @@ def test_compute_T_Madhu_param_sweep(params):
         params["T_set"],
         params["P_set"],
     )
-    np.testing.assert_array_equal(T_ours, T_theirs)
+    np.testing.assert_allclose(np.asarray(T_ours), T_theirs, rtol=1e-13, atol=1e-15)
 
 
 def test_gauss_conv_matches_poseidon():
-    """Verify our gauss_conv is the same as POSEIDON's (both are scipy bridges)."""
+    """Verify our gauss_conv matches POSEIDON's
+    (`scipy.ndimage.gaussian_filter1d`) at the v1-A primitive tolerance
+    (rtol=1e-13, the FP-reorder bound documented for
+    `_jax_filters.gaussian_filter1d_edge`)."""
     from POSEIDON.atmosphere import gauss_conv as p_gauss
 
     rng = np.random.default_rng(0)
     arr = rng.standard_normal((100, 1, 1))
-    np.testing.assert_array_equal(
-        _atmosphere.gauss_conv(arr), p_gauss(arr, sigma=3, axis=0, mode="nearest")
+    np.testing.assert_allclose(
+        np.asarray(_atmosphere.gauss_conv(arr)),
+        p_gauss(arr, sigma=3, axis=0, mode="nearest"),
+        rtol=1e-13,
+        atol=1e-15,
     )
 
 
@@ -337,7 +343,7 @@ def test_radial_profiles_matches_poseidon():
     theirs = p_rp(P, T, g_0, R_p, P_ref, R_p_ref, mu, 1, 1)
     assert len(ours) == len(theirs) == 5
     for a, b in zip(ours, theirs):
-        np.testing.assert_array_equal(a, b)
+        np.testing.assert_allclose(np.asarray(a), b, rtol=1e-13, atol=1e-7)
 
 
 def test_radial_profiles_constant_g_matches_poseidon():
@@ -350,7 +356,7 @@ def test_radial_profiles_constant_g_matches_poseidon():
     ours = _atmosphere.radial_profiles_constant_g(P, T, g_0, P_ref, R_p_ref, mu, 1, 1)
     theirs = p_rpcg(P, T, g_0, P_ref, R_p_ref, mu, 1, 1)
     for a, b in zip(ours, theirs):
-        np.testing.assert_array_equal(a, b)
+        np.testing.assert_allclose(np.asarray(a), b, rtol=1e-13, atol=1e-7)
 
 
 @pytest.mark.parametrize(
@@ -368,7 +374,7 @@ def test_radial_profiles_param_sweep(R_p, g_0, P_ref):
     ours = _atmosphere.radial_profiles(P, T, g_0, R_p, P_ref, R_p, mu, 1, 1)
     theirs = p_rp(P, T, g_0, R_p, P_ref, R_p, mu, 1, 1)
     for a, b in zip(ours, theirs):
-        np.testing.assert_array_equal(a, b)
+        np.testing.assert_allclose(np.asarray(a), b, rtol=1e-13, atol=1e-7)
 
 
 # ---------------------------------------------------------------------------
@@ -462,12 +468,22 @@ def _profiles_assert_match(cfg):
     )
     assert len(ours) == len(theirs) == 13
     # T, n, r, r_up, r_low, dr, mu, X, X_active, X_CIA, X_ff, X_bf, physical
+    # Tolerances:
+    #  - dr (idx 5) gets atol=1e-7 because radius-difference values
+    #    inherit the radial_profiles FP-reorder residual.
+    #  - n (idx 1) hits 1e23 scale — rtol=1e-13 of that is ~1e10, so
+    #    plain rtol is appropriate.
     for i, (a, b) in enumerate(zip(ours, theirs)):
         if isinstance(a, bool) or isinstance(b, (bool, np.bool_)):
             assert a == b, f"physical-flag mismatch at index {i}: {a} vs {b}"
         else:
-            np.testing.assert_array_equal(
-                a, b, err_msg=f"profiles() output {i} differs"
+            atol = 1e-7 if i in (2, 3, 4, 5) else 1e-15
+            np.testing.assert_allclose(
+                np.asarray(a),
+                b,
+                rtol=1e-12,
+                atol=atol,
+                err_msg=f"profiles() output {i} differs",
             )
 
 

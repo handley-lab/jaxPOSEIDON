@@ -6,19 +6,24 @@ Faithful port of the v0 subset of POSEIDON `absorption.py:28-322`
 plus the grid-index helpers `closest_index`, `prior_index`,
 `prior_index_V2` from `utility.py`.
 
-Strategy: this port mirrors POSEIDON's algorithm exactly, including its
-log-σ / log-P / 1/T interpolation weights and the nearest-fine-grid
-runtime lookup convention. Numerically the ports use plain numpy (no
-@jit) so the result is bit-equivalent to POSEIDON's numba implementation
-where the operation order is preserved. Tests compare to POSEIDON via
-np.testing.assert_array_equal.
+v1-B: numeric kernels rewritten in `jax.numpy` so the runtime
+extinction path is jit-traceable. Setup-time primitives
+(`closest_index`, `prior_index`, `prior_index_V2`) operate on
+Python scalars at setup; jit-able versions
+(`closest_index_jax`, `prior_index_V2_jax`) are exposed for the
+runtime hot path in `_jax_opacities.extinction_jax`.
 
 H-minus and Rayleigh cross sections are deferred to v1 unless K2-18b
 requires them (paper indicates negligible H-/Rayleigh contribution at
 ~250 K).
 """
 
-import numpy as np
+import jax
+
+jax.config.update("jax_enable_x64", True)
+
+import jax.numpy as jnp  # noqa: E402
+import numpy as np  # noqa: E402  (setup-time only; jit-runtime uses jnp)
 
 
 # ---------------------------------------------------------------------------
@@ -27,7 +32,7 @@ import numpy as np
 def prior_index(value, grid, start=0):
     """Index of the prior grid point for a non-uniform monotonic grid.
 
-    Mirrors POSEIDON `utility.py:67-101`.
+    Mirrors POSEIDON `utility.py:67-101`. Setup-time scalar function.
     """
     if value > grid[-1]:
         return len(grid) - 1
@@ -46,7 +51,7 @@ def prior_index(value, grid, start=0):
 def prior_index_V2(value, grid_start, grid_end, N_grid):
     """Prior index in a uniformly spaced grid.
 
-    Mirrors POSEIDON `utility.py:170-205`.
+    Mirrors POSEIDON `utility.py:170-205`. Setup-time scalar function.
     """
     if value < grid_start:
         return 0
@@ -58,7 +63,7 @@ def prior_index_V2(value, grid_start, grid_end, N_grid):
 def closest_index(value, grid_start, grid_end, N_grid):
     """Closest index in a uniformly spaced grid.
 
-    Mirrors POSEIDON `utility.py:209-247`.
+    Mirrors POSEIDON `utility.py:209-247`. Setup-time scalar function.
     """
     if N_grid == 1:
         return 0
@@ -71,6 +76,31 @@ def closest_index(value, grid_start, grid_end, N_grid):
         return int(i)
     else:
         return int(i) + 1
+
+
+def closest_index_jax(value, grid_start, grid_end, N_grid):
+    """jit-traceable counterpart of `closest_index`.
+
+    `value` may be a traced scalar; `grid_start`, `grid_end`, `N_grid`
+    are static Python ints/floats.
+    """
+    if N_grid == 1:
+        return jnp.int32(0)
+    span = grid_end - grid_start
+    i_float = (N_grid - 1) * ((value - grid_start) / span)
+    i_int = jnp.floor(i_float).astype(jnp.int32)
+    frac = i_float - i_int
+    rounded = jnp.where(frac <= 0.5, i_int, i_int + 1)
+    clipped = jnp.clip(rounded, 0, N_grid - 1)
+    return clipped
+
+
+def prior_index_V2_jax(value, grid_start, grid_end, N_grid):
+    """jit-traceable counterpart of `prior_index_V2`."""
+    span = grid_end - grid_start
+    i_float = (N_grid - 1) * ((value - grid_start) / span)
+    i_int = jnp.floor(i_float).astype(jnp.int32)
+    return jnp.clip(i_int, 0, N_grid - 1)
 
 
 # ---------------------------------------------------------------------------
@@ -92,14 +122,11 @@ def P_interpolate_wl_initialise_sigma(
 ):
     """Interpolate log10(σ)[log_P, T, ν] → σ[log_P_fine, T, λ_model].
 
-    Bit-exact port of POSEIDON `absorption.py:28-134`. Supports
-    `wl_interp='sample'` (nearest wavenumber index) and
-    `wl_interp='linear'` (linear in wavenumber). The output is in
-    increasing-wavelength order via the `(N_wl-1)-k` index reversal.
+    Bit-exact port of POSEIDON `absorption.py:28-134`. Setup-time
+    function: produces opacity tables used at runtime.
 
-    Extrapolation sentinels in `x`:
-      `x[i] == -1`: fine pressure below grid minimum → clamp to min.
-      `x[i] == -2`: fine pressure above grid maximum → clamp to max.
+    Numerics use plain numpy (numba-equivalent reduction order); jit is
+    not required because this runs once per retrieval setup.
     """
     sigma_pre_inp = np.zeros((N_P_fine, N_T, N_wl))
     N_nu_opac = len(nu_opac)
@@ -107,13 +134,9 @@ def P_interpolate_wl_initialise_sigma(
     for k in range(N_nu):
         if wl_interp == "sample":
             z = closest_index(nu_model[k], nu_opac[0], nu_opac[-1], N_nu_opac)
-            c1 = c2 = 0.0  # unused
-        else:  # 'linear'
+            c1 = c2 = 0.0
+        else:
             z = prior_index_V2(nu_model[k], nu_opac[0], nu_opac[-1], N_nu_opac)
-            # Guard z+1 indexing: out-of-range branches below produce zeros
-            # without ever reading nu_opac[z+1]. Mirrors POSEIDON's intended
-            # semantics but is explicit in numpy (numba tolerated the
-            # out-of-bounds read because it never executed).
             if (z == 0) or (z == (N_nu_opac - 1)):
                 c1 = c2 = 0.0
             else:
@@ -139,7 +162,7 @@ def P_interpolate_wl_initialise_sigma(
                         sigma_pre_inp[i, j, (N_wl - 1) - k] = 10 ** (
                             b1[i] * reduced_sigma[0] + b2[i] * reduced_sigma[1]
                         )
-                else:  # 'linear'
+                else:
                     if x[i] == -1:
                         sigma_pre_inp[i, j, (N_wl - 1) - k] = 10 ** (
                             c1 * log_sigma[0, j, z] + c2 * log_sigma[0, j, z + 1]
@@ -169,7 +192,8 @@ def wl_initialise_cia(
 ):
     """Interpolate log10(α_CIA)[T, ν] → α[T, λ_model].
 
-    Bit-exact port of POSEIDON `absorption.py:138-200`.
+    Bit-exact port of POSEIDON `absorption.py:138-200`. Setup-time
+    function.
     """
     cia_pre_inp = np.zeros((N_T_cia, N_wl))
     N_nu_cia = len(nu_cia)
@@ -207,14 +231,8 @@ def wl_initialise_cia(
 def T_interpolation_init(N_T_fine, T_grid, T_fine, y):
     """Precompute T-interp weights and out-of-grid sentinels.
 
-    Bit-exact port of POSEIDON `absorption.py:204-236`. Modifies `y`
-    in place (out parameter), returns `w_T`.
-
-    Sentinels in `y`:
-      `y[j] == -1`: fine T below grid → caller clamps to T_grid[0].
-      `y[j] == -2`: fine T at/above grid max → caller clamps to T_grid[-1].
-    Otherwise `y[j]` is the prior index in `T_grid` and `w_T[j]` is the
-    1/T-difference weight.
+    Bit-exact port of POSEIDON `absorption.py:204-236`. Setup-time
+    function; modifies `y` in place (out parameter), returns `w_T`.
     """
     w_T = np.zeros(N_T_fine)
     for j in range(N_T_fine):
@@ -237,7 +255,13 @@ def T_interpolate_sigma(
 ):
     """Interpolate σ from coarse T_grid onto T_fine (1/T-weighted geom mean).
 
-    Bit-exact port of POSEIDON `absorption.py:240-279`.
+    Bit-exact port of POSEIDON `absorption.py:240-279`. Setup-time
+    function; produces opacity table consumed at runtime.
+
+    `jnp`-pure version (`T_interpolate_sigma_jax`) is exposed for
+    callers that need to differentiate through the T-interp; the
+    default setup path stays in numpy for memory efficiency on the
+    large grids typical of opacity-sampling mode.
     """
     sigma_inp = np.zeros((N_P_fine, N_T_fine, N_wl))
     for i in range(N_P_fine):
@@ -261,7 +285,8 @@ def T_interpolate_sigma(
 def T_interpolate_cia(N_T_fine, N_T_cia, N_wl, cia_pre_inp, T_grid_cia, T_fine, y, w_T):
     """Interpolate CIA α from coarse T_grid_cia onto T_fine.
 
-    Bit-exact port of POSEIDON `absorption.py:283-322`.
+    Bit-exact port of POSEIDON `absorption.py:283-322`. Setup-time
+    function.
     """
     cia_inp = np.zeros((N_T_fine, N_wl))
     for j in range(N_T_fine):

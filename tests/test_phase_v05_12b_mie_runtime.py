@@ -248,7 +248,9 @@ def _aerosol_grid(tmp_path, monkeypatch, species=("H2O", "ZnS")):
     "cloud_type,n_species",
     [("uniform_X", 2), ("slab", 2), ("fuzzy_deck", 1), ("one_slab", 2)],
 )
-def test_Mie_cloud_runtime_matches_poseidon(tmp_path, monkeypatch, cloud_type, n_species):
+def test_Mie_cloud_runtime_matches_poseidon(
+    tmp_path, monkeypatch, cloud_type, n_species
+):
     from POSEIDON.clouds import Mie_cloud as p_Mie
 
     species = ["H2O", "ZnS"][:n_species]

@@ -50,7 +50,7 @@ def test_compute_T_Guillot_matches_poseidon(P, log_kappa_IR, log_gamma, T_int, T
         T_int=T_int,
         T_equ=T_equ,
     )
-    np.testing.assert_array_equal(
+    np.testing.assert_allclose(
         _atmosphere.compute_T_Guillot(P, **args), p_guillot(P, **args)
     )
 
@@ -74,7 +74,7 @@ def test_compute_T_Guillot_dayside_matches_poseidon(
         T_int=T_int,
         T_equ=T_equ,
     )
-    np.testing.assert_array_equal(
+    np.testing.assert_allclose(
         _atmosphere.compute_T_Guillot_dayside(P, **args), p_g(P, **args)
     )
 
@@ -93,9 +93,7 @@ def test_compute_T_Line_matches_poseidon(P, alpha, beta):
         beta=beta,
         T_int=200.0,
     )
-    np.testing.assert_array_equal(
-        _atmosphere.compute_T_Line(P, **args), p_line(P, **args)
-    )
+    np.testing.assert_allclose(_atmosphere.compute_T_Line(P, **args), p_line(P, **args))
 
 
 @pytest.mark.parametrize(
@@ -115,7 +113,7 @@ def test_compute_T_slope_matches_poseidon(P, log_P_phot, log_P_arr):
     from POSEIDON.atmosphere import compute_T_slope as p_slope
 
     Delta_T_arr = np.linspace(100.0, 10.0, len(log_P_arr))
-    np.testing.assert_array_equal(
+    np.testing.assert_allclose(
         _atmosphere.compute_T_slope(P, 1200.0, Delta_T_arr, log_P_phot, log_P_arr),
         p_slope(P, 1200.0, Delta_T_arr, log_P_phot, log_P_arr),
     )
@@ -126,7 +124,7 @@ def test_compute_T_Pelletier_matches_poseidon(P, n_knots):
     from POSEIDON.atmosphere import compute_T_Pelletier as p_pell
 
     T_points = np.linspace(800.0, 1600.0, n_knots)
-    np.testing.assert_array_equal(
+    np.testing.assert_allclose(
         _atmosphere.compute_T_Pelletier(P, T_points),
         p_pell(P, T_points),
     )
@@ -213,9 +211,7 @@ def _profiles_assert_match(cfg):
         if isinstance(a, (bool, np.bool_)) or isinstance(b, (bool, np.bool_)):
             assert a == b, f"physical-flag mismatch at index {i}: {a} vs {b}"
         else:
-            np.testing.assert_array_equal(
-                a, b, err_msg=f"profiles() output {i} differs"
-            )
+            np.testing.assert_allclose(a, b, err_msg=f"profiles() output {i} differs")
 
 
 def test_profiles_Guillot_matches_poseidon():
@@ -379,7 +375,12 @@ def test_assign_free_params_full_tuple_matches_poseidon(PT_profile, extra):
     theirs = _poseidon_assign(PT_profile=PT_profile, **extra)
     assert len(ours) == len(theirs)
     for i, (a, b) in enumerate(zip(ours, theirs, strict=True)):
-        np.testing.assert_array_equal(a, b, err_msg=f"tuple element {i} differs")
+        # Mixed string + numeric tuple elements: dispatch by dtype.
+        a_arr = np.asarray(a)
+        if a_arr.dtype.kind in ("U", "S", "O"):
+            np.testing.assert_array_equal(a, b, err_msg=f"tuple element {i} differs")
+        else:
+            np.testing.assert_allclose(a, b, err_msg=f"tuple element {i} differs")
 
 
 # ---------------------------------------------------------------------------

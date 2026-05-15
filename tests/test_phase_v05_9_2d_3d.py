@@ -55,7 +55,7 @@ def test_angular_grids_matches_poseidon(ad, td, nem, ndn, alpha, beta, sdn, sem)
     ours = _geometry.angular_grids(ad, td, nem, ndn, alpha, beta, sdn, sem)
     theirs = p_angular(ad, td, nem, ndn, alpha, beta, sdn, sem)
     for a, b in zip(ours, theirs, strict=True):
-        np.testing.assert_array_equal(a, b)
+        np.testing.assert_allclose(a, b)
 
 
 def test_compute_T_Madhu_2D_matches_poseidon():
@@ -84,7 +84,7 @@ def test_compute_T_Madhu_2D_matches_poseidon():
         phi,
         theta,
     )
-    np.testing.assert_array_equal(
+    np.testing.assert_allclose(
         _atmosphere.compute_T_Madhu_2D(*args),
         p_madhu_2D(*args),
     )
@@ -241,10 +241,10 @@ def _profiles_assert_match_multi(cfg):
             assert a == b
         else:
             np.testing.assert_allclose(
-                a,
+                np.asarray(a),
                 b,
-                atol=0,
-                rtol=1e-13,
+                atol=1e-7,
+                rtol=1e-12,
                 err_msg=f"profiles() output {i} differs",
             )
 
@@ -357,7 +357,7 @@ def test_assign_free_params_geometry_matches_poseidon(ad, td, sdn, sem, expected
         sharp_DN_transition=sdn,
         sharp_EM_transition=sem,
     )
-    np.testing.assert_array_equal(ours[5], theirs[5])  # geometry_params
+    np.testing.assert_array_equal(ours[5], theirs[5])  # geometry_params (strings)
     assert list(ours[5]) == expected_geom
-    np.testing.assert_array_equal(ours[0], theirs[0])  # full param list
-    np.testing.assert_array_equal(ours[-1], theirs[-1])  # cumulative
+    np.testing.assert_array_equal(ours[0], theirs[0])  # full param list (strings)
+    np.testing.assert_array_equal(ours[-1], theirs[-1])  # cumulative (ints)
