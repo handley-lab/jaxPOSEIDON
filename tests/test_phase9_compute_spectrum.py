@@ -133,16 +133,51 @@ def test_compute_spectrum_returns_NaN_for_temperature_out_of_fine_grid():
     "spectrum_type",
     [
         "emission",
-        "direct_emission",
         "dayside_emission",
         "nightside_emission",
     ],
 )
-def test_compute_spectrum_rejects_non_transmission_types(spectrum_type):
+def test_compute_spectrum_emission_types_matches_poseidon(spectrum_type):
+    """Phase 0.5.13c full: emission / dayside_emission / nightside_emission
+    parity vs POSEIDON for the no-scattering, no-surface case."""
+    from POSEIDON.core import compute_spectrum as p_compute_spectrum
+
     planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
-    with pytest.raises(NotImplementedError, match="spectrum_type"):
+    # POSEIDON needs a stellar spectrum for transit emission ratios.
+    star["F_star"] = np.full_like(wl, 1e7)
+    star["wl_star"] = wl
+    ours = j_compute_spectrum(
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type=spectrum_type,
+    )
+    theirs = p_compute_spectrum(
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type=spectrum_type,
+    )
+    np.testing.assert_allclose(ours, theirs, atol=0, rtol=1e-13)
+
+
+def test_compute_spectrum_direct_emission_requires_distance():
+    planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
+    with pytest.raises(Exception, match="system_distance"):
         j_compute_spectrum(
-            planet, star, model, atmosphere, opac, wl, spectrum_type=spectrum_type
+            planet,
+            star,
+            model,
+            atmosphere,
+            opac,
+            wl,
+            spectrum_type="direct_emission",
         )
 
 
@@ -161,12 +196,24 @@ def test_compute_spectrum_transmission_time_average_matches_poseidon(y_p):
 
     planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
     ours = j_compute_spectrum(
-        planet, star, model, atmosphere, opac, wl,
-        spectrum_type="transmission_time_average", y_p=y_p,
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type="transmission_time_average",
+        y_p=y_p,
     )
     theirs = p_compute_spectrum(
-        planet, star, model, atmosphere, opac, wl,
-        spectrum_type="transmission_time_average", y_p=y_p,
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type="transmission_time_average",
+        y_p=y_p,
     )
     np.testing.assert_array_equal(ours, theirs)
 
@@ -176,7 +223,12 @@ def test_compute_spectrum_transmission_time_average_unphysical_atmosphere():
     planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
     atmosphere["is_physical"] = False
     out = j_compute_spectrum(
-        planet, star, model, atmosphere, opac, wl,
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
         spectrum_type="transmission_time_average",
         y_p=np.array([-0.2, 0.0, 0.2]),
     )
@@ -333,7 +385,7 @@ def test_compute_spectrum_unsupported_config_takes_precedence_over_NaN():
     atmosphere["T"] = np.full_like(atmosphere["T"], 5000.0)
     with pytest.raises(NotImplementedError, match="spectrum_type"):
         j_compute_spectrum(
-            planet, star, model, atmosphere, opac, wl, spectrum_type="emission"
+            planet, star, model, atmosphere, opac, wl, spectrum_type="bogus_type"
         )
 
 
