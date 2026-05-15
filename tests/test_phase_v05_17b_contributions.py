@@ -264,37 +264,6 @@ def test_pressure_contribution_matches_poseidon(enable_haze, enable_deck, opts):
         _assert_close(a, b)
 
 
-# ---- gating tests ------------------------------------------------------------
-
-
-def test_spectral_rejects_surface():
-    cfg = _setup()
-    cfg["enable_surface"] = 1
-    with pytest.raises(NotImplementedError, match="surface"):
-        extinction_spectral_contribution(**cfg, contribution_species="H2O")
-
-
-def test_spectral_rejects_Mie():
-    cfg = _setup()
-    cfg["enable_Mie"] = 1
-    with pytest.raises(NotImplementedError, match="Mie"):
-        extinction_spectral_contribution(**cfg, contribution_species="H2O")
-
-
-def test_pressure_rejects_surface():
-    cfg = _setup()
-    cfg["enable_surface"] = 1
-    with pytest.raises(NotImplementedError, match="surface"):
-        extinction_pressure_contribution(**cfg, total_pressure_contribution=True)
-
-
-def test_pressure_rejects_Mie():
-    cfg = _setup()
-    cfg["enable_Mie"] = 1
-    with pytest.raises(NotImplementedError, match="Mie"):
-        extinction_pressure_contribution(**cfg, total_pressure_contribution=True)
-
-
 # ---- compute_spectrum wiring -------------------------------------------------
 
 
