@@ -236,11 +236,11 @@ def test_unpack_Mie_cloud_params_fuzzy_deck_matches_poseidon():
 # ---------------------------------------------------------------------------
 # Mie_cloud runtime parity vs POSEIDON Mie_cloud
 # ---------------------------------------------------------------------------
-def _aerosol_grid(tmp_path, species=("H2O", "ZnS")):
+def _aerosol_grid(tmp_path, monkeypatch, species=("H2O", "ZnS")):
     from jaxposeidon._aerosol_db_loader import load_aerosol_grid
 
     _synthetic_aerosol_db(tmp_path, aerosol_species=species)
-    os.environ["POSEIDON_input_data"] = str(tmp_path) + os.sep  # noqa: SIM112
+    monkeypatch.setenv("POSEIDON_input_data", str(tmp_path) + os.sep)
     return load_aerosol_grid(list(species))
 
 
@@ -248,11 +248,11 @@ def _aerosol_grid(tmp_path, species=("H2O", "ZnS")):
     "cloud_type,n_species",
     [("uniform_X", 2), ("slab", 2), ("fuzzy_deck", 1), ("one_slab", 2)],
 )
-def test_Mie_cloud_runtime_matches_poseidon(tmp_path, cloud_type, n_species):
+def test_Mie_cloud_runtime_matches_poseidon(tmp_path, monkeypatch, cloud_type, n_species):
     from POSEIDON.clouds import Mie_cloud as p_Mie
 
     species = ["H2O", "ZnS"][:n_species]
-    grid = _aerosol_grid(tmp_path, species=tuple(species))
+    grid = _aerosol_grid(tmp_path, monkeypatch, species=tuple(species))
     P, r, H, n = _atm_arrays()
     wl = np.linspace(1.0, 5.0, 25)
     r_m = np.array([0.1] * n_species)
