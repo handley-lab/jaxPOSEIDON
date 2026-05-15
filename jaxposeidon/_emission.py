@@ -722,7 +722,11 @@ def build_surf_reflect(
     surface_component_percentages,
     surface_percentage_apply_to,
 ):
-    """Construct (surf_reflect, surf_reflect_array) per POSEIDON `core.py:1527-1556`/`1741-1770`."""
+    """Construct ``(surf_reflect, surf_reflect_array)``.
+
+    Bit-equivalent port of POSEIDON ``core.py:1741-1770`` (the CPU branch
+    of the inline `surf_reflect` construction inside `compute_spectrum`).
+    """
     from jaxposeidon._surface_setup import interpolate_surface_components
 
     if surface or albedo_deck != -1:

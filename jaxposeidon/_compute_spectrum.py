@@ -173,24 +173,27 @@ def compute_spectrum(
     phi_cloud_0 = atmosphere["phi_cloud_0"]
     theta_cloud_0 = atmosphere["theta_cloud_0"]
     P_surf = atmosphere["P_surf"]
-    albedo_deck = atmosphere.get("albedo_deck", -1)
-    albedo_surf = atmosphere.get("albedo_surf", -1)
-    T_surf = atmosphere.get("T_surf", 0.0)
-    surface_component_percentages = atmosphere.get(
-        "surface_component_percentages", np.array([])
-    )
-    R_p_ref = atmosphere.get("R_p_ref", planet.get("planet_radius"))
+    albedo_deck = atmosphere["albedo_deck"]
+    albedo_surf = atmosphere["albedo_surf"]
+    T_surf = atmosphere["T_surf"]
+    surface_component_percentages = atmosphere["surface_component_percentages"]
+    R_p_ref = atmosphere["R_p_ref"]
 
-    surface = bool(model.get("surface", False))
-    surface_model = model.get("surface_model", "gray")
-    surface_components = model.get("surface_components", [])
-    surface_component_albedos = model.get("surface_component_albedos", None)
-    surface_percentage_apply_to = model.get("surface_percentage_apply_to", "models")
+    surface = model["surface"]
+    surface_model = model["surface_model"]
+    surface_components = model["surface_components"]
+    surface_component_albedos = model["surface_component_albedos"]
+    surface_percentage_apply_to = model["surface_percentage_apply_to"]
 
-    if surface and len(surface_component_percentages) > 0:
-        s = np.sum(surface_component_percentages)
-        if round(s) != 1.0:
-            surface_component_percentages = surface_component_percentages / s
+    # POSEIDON core.py:1470-1472: renormalize percentages
+    if (
+        surface
+        and len(surface_component_percentages) > 0
+        and round(np.sum(surface_component_percentages)) != 1.0
+    ):
+        surface_component_percentages = surface_component_percentages / np.sum(
+            surface_component_percentages
+        )
 
     chemical_species = model["chemical_species"]
     active_species = model["active_species"]
