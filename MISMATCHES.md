@@ -70,8 +70,8 @@ relaxations are:
 - The forward computation runs on the host CPU inside the callback
   rather than on the JAX device. For TRIDENT this is the same code
   path as v0.5 numpy and matches the v1-C gate (which only requires
-  `jax.jit(compute_spectrum)(spectrum_type='transmission', ...)` to
-  match numpy at rtol=1e-13, not GPU acceleration).
+  `jax.jit(compute_transmission_spectrum_jit)(...)` to match numpy
+  at rtol=1e-13, not GPU acceleration).
 
 The pure-`jnp` kernels for the vectorisable post-processing
 (`compute_tau_vert_jax`, `trans_from_path_tau_jax`) are exposed in
