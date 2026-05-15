@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jaxposeidon"
-version = "0.5.4"
+version = "0.5.5"
 description = "JAX-native port of POSEIDON's transmission-spectroscopy forward model."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -79,6 +79,11 @@ ignore = [
 # original branch structure, condition ordering, mutable defaults and
 # loop-bound closures for review parity.
 "jaxposeidon/_high_res.py" = ["SIM102", "SIM300", "B006", "B023"]
+# v1-D Toon reflection inner loops bind angle / phase variables — same
+# review-parity rationale as `_high_res.py` (POSEIDON `emission.py:976-1573`
+# keeps the original `for ng in range(Gauss_quad)` / `for nt in range(numt)`
+# structure with closure-captured `u0` / `u1` / `p_single`).
+"jaxposeidon/_emission.py" = ["B023"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -39,11 +39,11 @@ def test_stellar_contamination_single_spot_matches_poseidon():
     from POSEIDON.stellar import stellar_contamination_single_spot as p_sc
 
     wl = np.linspace(0.5, 5.0, 100)
-    I_phot = _stellar.planck_lambda(5800.0, wl)
-    I_het = _stellar.planck_lambda(4500.0, wl)
+    I_phot = np.asarray(_stellar.planck_lambda(5800.0, wl))
+    I_het = np.asarray(_stellar.planck_lambda(4500.0, wl))
     f = 0.1
     np.testing.assert_allclose(
-        _stellar.stellar_contamination_single_spot(f, I_het, I_phot),
+        np.asarray(_stellar.stellar_contamination_single_spot(f, I_het, I_phot)),
         p_sc(f, I_het, I_phot),
         atol=0,
         rtol=1e-13,
@@ -54,16 +54,16 @@ def test_stellar_contamination_general_matches_poseidon():
     from POSEIDON.stellar import stellar_contamination_general as p_sc
 
     wl = np.linspace(0.5, 5.0, 100)
-    I_phot = _stellar.planck_lambda(5800.0, wl)
+    I_phot = np.asarray(_stellar.planck_lambda(5800.0, wl))
     I_het = np.stack(
         [
-            _stellar.planck_lambda(4500.0, wl),
-            _stellar.planck_lambda(6200.0, wl),
+            np.asarray(_stellar.planck_lambda(4500.0, wl)),
+            np.asarray(_stellar.planck_lambda(6200.0, wl)),
         ]
     )
     f_het = np.array([0.08, 0.03])
     np.testing.assert_allclose(
-        _stellar.stellar_contamination_general(f_het, I_het, I_phot),
+        np.asarray(_stellar.stellar_contamination_general(f_het, I_het, I_phot)),
         p_sc(f_het, I_het, I_phot),
         atol=0,
         rtol=1e-13,

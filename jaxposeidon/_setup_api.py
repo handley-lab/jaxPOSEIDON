@@ -77,9 +77,14 @@ def create_star(
     Accepts the full POSEIDON kwarg surface; non-v0-skeleton paths
     raise descriptive `NotImplementedError`.
     """
-    if stellar_contam is not None:
+    if stellar_contam is not None and stellar_contam not in (
+        "one_spot",
+        "two_spots",
+        "three_spots",
+    ):
         raise NotImplementedError(
-            "Stellar contamination (one_spot / two_spots) is Phase 0.5.11."
+            f"stellar_contam={stellar_contam!r} not in "
+            "('one_spot', 'two_spots', 'three_spots')."
         )
     if stellar_grid not in ("blackbody", "custom"):
         raise NotImplementedError(
@@ -103,6 +108,26 @@ def create_star(
     # Uniform stellar surface: F_star = π · I_phot.
     F_star = np.pi * I_phot
 
+    # Stellar contamination heterogeneity intensities (blackbody only at
+    # v1-D; pysynphot / PyMSG grids are a follow-up).
+    I_het = None
+    I_spot = None
+    I_fac = None
+    if stellar_contam == "one_spot" and T_het is not None:
+        I_het = _planck_lambda(T_het, wl_star)
+    elif stellar_contam in ("two_spots", "three_spots"):
+        het_intensities = []
+        if T_spot is not None:
+            I_spot = _planck_lambda(T_spot, wl_star)
+            het_intensities.append(I_spot)
+        if T_fac is not None:
+            I_fac = _planck_lambda(T_fac, wl_star)
+            het_intensities.append(I_fac)
+        if stellar_contam == "three_spots" and T_het is not None:
+            het_intensities.append(_planck_lambda(T_het, wl_star))
+        if het_intensities:
+            I_het = np.stack(het_intensities, axis=0)
+
     return {
         "R_s": R_s,
         "T_eff": T_eff,
@@ -116,15 +141,15 @@ def create_star(
         "T_het": T_het,
         "log_g_het": log_g_het,
         "f_spot": f_spot,
-        "T_spot": T_het,
-        "log_g_spot": log_g_het,
+        "T_spot": T_spot if T_spot is not None else T_het,
+        "log_g_spot": log_g_spot if log_g_spot is not None else log_g_het,
         "f_fac": f_fac,
-        "T_fac": T_het,
-        "log_g_fac": log_g_het,
+        "T_fac": T_fac if T_fac is not None else T_het,
+        "log_g_fac": log_g_fac if log_g_fac is not None else log_g_het,
         "I_phot": I_phot,
-        "I_het": None,
-        "I_spot": None,
-        "I_fac": None,
+        "I_het": I_het,
+        "I_spot": I_spot,
+        "I_fac": I_fac,
         "stellar_grid": stellar_grid,
         "stellar_interp_backend": interp_backend,
         "stellar_contam": stellar_contam,

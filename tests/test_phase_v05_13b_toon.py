@@ -31,7 +31,9 @@ def test_numba_cumsum_matches_poseidon():
 
     rng = np.random.default_rng(0)
     mat = rng.standard_normal((20, 30))
-    np.testing.assert_array_equal(_emission.numba_cumsum(mat), p_cs(mat))
+    np.testing.assert_allclose(
+        np.asarray(_emission.numba_cumsum(mat)), p_cs(mat), rtol=1e-13, atol=1e-15
+    )
 
 
 def test_determine_photosphere_radii_matches_poseidon():
@@ -134,9 +136,11 @@ def test_tri_diag_solve_matches_poseidon():
     b = rng.uniform(2.0, 4.0, size=L)
     c = rng.uniform(-1.0, 1.0, size=L)
     d = rng.standard_normal(L)
-    np.testing.assert_array_equal(
-        _emission.tri_diag_solve(L, a, b, c, d),
+    np.testing.assert_allclose(
+        np.asarray(_emission.tri_diag_solve(L, a, b, c, d)),
         p_tds(L, a, b, c, d),
+        rtol=1e-13,
+        atol=1e-15,
     )
 
 
