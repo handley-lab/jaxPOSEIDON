@@ -181,6 +181,73 @@ def test_compute_spectrum_direct_emission_requires_distance():
         )
 
 
+def test_compute_spectrum_direct_emission_matches_poseidon():
+    """direct_emission parity with system_distance set."""
+    from POSEIDON.core import compute_spectrum as p_compute_spectrum
+
+    planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
+    planet["system_distance"] = 10.0 * 3.086e16  # 10 pc in metres
+    star["F_star"] = np.full_like(wl, 1e7)
+    star["wl_star"] = wl
+    ours = j_compute_spectrum(
+        planet, star, model, atmosphere, opac, wl,
+        spectrum_type="direct_emission",
+    )
+    theirs = p_compute_spectrum(
+        planet, star, model, atmosphere, opac, wl,
+        spectrum_type="direct_emission",
+    )
+    np.testing.assert_allclose(ours, theirs, atol=0, rtol=1e-13)
+
+
+def test_compute_spectrum_dayside_nightside_differ_with_multi_zone():
+    """With N_zones > 1, dayside (zone 0) and nightside (zone -1)
+    select different layers of the atmosphere → distinct spectra.
+
+    Synthetic test: tile atmosphere arrays across 2 zones and set the
+    dayside zone hotter than the nightside; assert the resulting spectra
+    differ.
+    """
+    planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
+    star["F_star"] = np.full_like(wl, 1e7)
+    star["wl_star"] = wl
+
+    # Replicate every per-zone field across 2 zones with different T per zone.
+    N_layers = atmosphere["T"].shape[0]
+    # Both temperatures stay inside the 900–1100 K fine-T grid.
+    new_T = np.zeros((N_layers, 1, 2))
+    new_T[:, 0, 0] = 1050.0  # dayside
+    new_T[:, 0, 1] = 950.0   # nightside
+
+    def tile_zone(arr):
+        """Tile a (..., 1, 1) array across 2 zones."""
+        return np.repeat(arr, 2, axis=-1)
+
+    atmosphere = {**atmosphere}
+    atmosphere["T"] = new_T
+    atmosphere["dr"] = tile_zone(atmosphere["dr"])
+    atmosphere["r"] = tile_zone(atmosphere["r"])
+    atmosphere["r_up"] = tile_zone(atmosphere["r_up"])
+    atmosphere["r_low"] = tile_zone(atmosphere["r_low"])
+    atmosphere["n"] = tile_zone(atmosphere["n"])
+    atmosphere["X"] = np.repeat(atmosphere["X"], 2, axis=-1)
+    atmosphere["X_active"] = np.repeat(atmosphere["X_active"], 2, axis=-1)
+    atmosphere["X_CIA"] = np.repeat(atmosphere["X_CIA"], 2, axis=-1)
+    atmosphere["X_ff"] = np.repeat(atmosphere["X_ff"], 2, axis=-1)
+    atmosphere["X_bf"] = np.repeat(atmosphere["X_bf"], 2, axis=-1)
+    atmosphere["N_zones"] = 2
+    atmosphere["theta_edge"] = np.array([-np.pi / 2, 0.0, np.pi / 2])
+
+    s_day = j_compute_spectrum(
+        planet, star, model, atmosphere, opac, wl, spectrum_type="dayside_emission",
+    )
+    s_night = j_compute_spectrum(
+        planet, star, model, atmosphere, opac, wl, spectrum_type="nightside_emission",
+    )
+    # Different zones, different T → different spectrum.
+    assert np.any(np.abs(s_day - s_night) > 0.0)
+
+
 @pytest.mark.parametrize(
     "y_p",
     [

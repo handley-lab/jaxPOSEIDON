@@ -250,7 +250,6 @@ def compute_spectrum(
         # not propagated here for opacity-sampling parity).
     )
 
-    # ----- emission spectrum_types (POSEIDON core.py:1881-2091) --------------
     if is_emission:
         if "dayside" in spectrum_type:
             zone_idx = 0
