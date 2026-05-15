@@ -1,20 +1,28 @@
 """High-resolution-spectroscopy hot-path functions.
 
-Ports POSEIDON `high_res.py:14-29, 179-256, 257-285, 319-336, 339-404,
-440-450, 834-859, 862-882`.
+Ports POSEIDON `high_res.py:14-29, 107-176, 179-256, 257-285, 288-316,
+319-336, 339-404, 440-450, 503-609, 612-750, 753-831, 834-859, 862-882,
+902-958`.
 
 0.5.16a shipped airtovac / vactoair / sysrem.
 
-0.5.16b1 adds the data-prep + Doppler + CCF surface:
+0.5.16b1 added the data-prep + Doppler + CCF surface:
 `fast_filter`, `fit_out_transit_spec`, `get_RV_range`, `find_nearest_idx`,
 `cross_correlate`, `get_rot_kernel`, `remove_outliers`.
 
-The PCA-based and h5py-based pieces (`make_data_cube`, `PCA_rebuild`,
-`prepare_high_res_data`, `loglikelihood_PCA`, `loglikelihood_sysrem`,
-`loglikelihood_high_res`) are deferred to 0.5.16b2.
+0.5.16b2 adds the multi-likelihood pipeline: `make_data_cube`,
+`PCA_rebuild`, `prepare_high_res_data`, `loglikelihood_PCA`,
+`loglikelihood_sysrem`, `loglikelihood_high_res`, `make_injection_data`.
 """
 
+import os
+
+import h5py
 import numpy as np
+from scipy import constants
+from scipy.ndimage import gaussian_filter1d
+from scipy.optimize import minimize
+from sklearn.decomposition import TruncatedSVD
 
 from jaxposeidon._constants import C_M_PER_S
 
@@ -256,6 +264,471 @@ def get_rot_kernel(V_sin_i, wl, W_conv):
     rot_ker /= rot_ker.sum()
 
     return rot_ker
+
+
+def make_data_cube(data, n_components=4):
+    """SVD/PCA background-subtract + 3-sigma clip per order.
+
+    Bit-equivalent port of POSEIDON `high_res.py:288-306`. Returns
+    `(data_scale, data_arr)` where `data_arr` is the residual cube with
+    >3sigma deviations zeroed in-place.
+    """
+    nord, nphi, npix = data.shape
+
+    data_scale = PCA_rebuild(data, n_components=n_components)
+    data_arr = data - data_scale
+
+    for i in range(nord):
+        A = data_arr[i]
+        sigma = np.std(A)
+        median = np.median(A)
+        loc = np.where(A > 3 * sigma + median)
+        A[loc] = 0
+        loc = np.where(A < -3 * sigma + median)
+        A[loc] = 0
+        data_arr[i] = A
+
+    return data_scale, data_arr
+
+
+def PCA_rebuild(flux, n_components=5):
+    """Per-order TruncatedSVD reconstruction.
+
+    Bit-equivalent port of POSEIDON `high_res.py:309-316`.
+    """
+    nord, nphi, npix = flux.shape
+    rebuilt = np.zeros_like(flux)
+    for i in range(nord):
+        order = flux[i]
+        svd = TruncatedSVD(n_components=n_components).fit(order)
+        rebuilt[i] = svd.transform(order) @ svd.components_
+    return rebuilt
+
+
+def fit_uncertainties(flux, n_components=5, initial_guess=[0.1, 200], Print=True):
+    """Poisson-style uncertainty fit per order via PCA residuals + Nelder-Mead.
+
+    Bit-equivalent port of POSEIDON `high_res.py:53-75`.
+    """
+    if Print:
+        print(f"Fitting Poisson uncertainties with {n_components} components")
+    uncertainties = np.zeros(flux.shape)
+    nord = len(flux)
+    rebuilt = PCA_rebuild(flux, n_components=n_components)
+    residuals = flux - rebuilt
+
+    for i in range(nord):
+
+        def neg_likelihood(x):
+            a, b = x
+            sigma = np.sqrt(a * flux[i] + b)
+            loglikelihood = -0.5 * np.sum((residuals[i] / sigma) ** 2) - np.sum(
+                np.log(sigma)
+            )
+            return -loglikelihood
+
+        a, b = minimize(neg_likelihood, initial_guess, method="Nelder-Mead").x
+        best_fit = np.sqrt(a * flux[i] + b)
+        uncertainties[i] = best_fit
+
+    return PCA_rebuild(uncertainties, n_components=n_components)
+
+
+def prepare_high_res_data(
+    data_dir,
+    name,
+    spectrum_type,
+    method,
+    flux,
+    wl_grid,
+    phi,
+    uncertainties=None,
+    transit_weight=None,
+    V_bary=None,
+    pca_ncomp=4,
+    sysrem_niter=15,
+):
+    """Write `<data_dir>/<name>/data_processed.hdf5` per POSEIDON convention.
+
+    Bit-equivalent port of POSEIDON `high_res.py:107-176`.
+    """
+    if spectrum_type == "transmission":
+        if transit_weight is None:
+            raise Exception(
+                "Please provide transit_weight for transmission spectroscopy."
+            )
+
+    processed_data_path = os.path.join(data_dir, name, "data_processed.hdf5")
+
+    with h5py.File(processed_data_path, "w") as f:
+        print(f"Creating processed data at {processed_data_path}")
+        f.create_dataset("phi", data=phi)
+        f.create_dataset("wl_grid", data=wl_grid)
+        if V_bary is not None:
+            f.create_dataset("V_bary", data=V_bary)
+
+        nord, nphi, npix = flux.shape
+
+        if spectrum_type == "emission":
+            if method.lower() == "pca":
+                _, residuals = make_data_cube(flux, pca_ncomp)
+            elif method.lower() == "sysrem":
+                residuals, Us = fast_filter(flux, uncertainties, sysrem_niter)
+                Bs = np.zeros((nord, nphi, nphi))
+                for i in range(nord):
+                    U = Us[i]
+                    L = np.diag(1 / np.mean(uncertainties[i], axis=-1))
+                    B = U @ np.linalg.pinv(L @ U) @ L
+                    Bs[i] = B
+                f.create_dataset("Bs", data=Bs)
+                f.create_dataset("uncertainties", data=uncertainties)
+            f.create_dataset("flux", data=flux)
+            f.create_dataset("residuals", data=residuals)
+
+        elif spectrum_type == "transmission":
+            if method.lower() == "sysrem":
+                median = fit_out_transit_spec(flux, transit_weight, spec="median")
+                flux /= median
+                uncertainties /= median
+                residuals, Us = fast_filter(flux, uncertainties, sysrem_niter)
+                Bs = np.zeros((nord, nphi, nphi))
+                for i in range(nord):
+                    U = Us[i]
+                    L = np.diag(1 / np.mean(uncertainties[i], axis=-1))
+                    B = U @ np.linalg.pinv(L @ U) @ L
+                    Bs[i] = B
+                f.create_dataset("Bs", data=Bs)
+                f.create_dataset("residuals", data=residuals)
+                f.create_dataset("uncertainties", data=uncertainties)
+                f.create_dataset("transit_weight", data=transit_weight)
+
+    return
+
+
+def loglikelihood_PCA(V_sys, K_p, d_phi, a, wl, planet_spectrum, star_spectrum, data):
+    """PCA-based log-likelihood (Line 2019).
+
+    Bit-equivalent port of POSEIDON `high_res.py:503-609`.
+    """
+    residuals = data["residuals"]
+    flux = data["flux"]
+    data_scale = flux - residuals
+    phi = data["phi"]
+    wl_grid = data["wl_grid"]
+
+    try:
+        V_bary = data["V_bary"]
+    except KeyError:
+        V_bary = np.zeros_like(phi)
+
+    nord, nphi, npix = residuals.shape
+
+    radial_velocity_p = V_sys + V_bary + K_p * np.sin(2 * np.pi * (phi + d_phi))
+    delta_lambda_p = radial_velocity_p * 1e3 / constants.c
+
+    K_s = 0.3229
+    radial_velocity_s = V_sys + V_bary - K_s * np.sin(2 * np.pi * phi) * 0
+    delta_lambda_s = radial_velocity_s * 1e3 / constants.c
+
+    loglikelihood_sum = 0
+    CCF_sum = 0
+    for j in range(nord):
+        wl_slice = wl_grid[j]
+        F_p_F_s = np.zeros((nphi, npix))
+        for i in range(nphi):
+            wl_shifted_p = wl_slice * (1.0 - delta_lambda_p[i])
+            F_p = np.interp(wl_shifted_p, wl, planet_spectrum)
+            wl_shifted_s = wl_slice * (1.0 - delta_lambda_s[i])
+            F_s = np.interp(wl_shifted_s, wl, star_spectrum)
+            F_p_F_s[i, :] = F_p / F_s
+
+        model_injected = (1 + F_p_F_s) * data_scale[j, :]
+
+        svd = TruncatedSVD(n_components=4, n_iter=4, random_state=42).fit(
+            model_injected
+        )
+        models_filtered = model_injected - (
+            svd.transform(model_injected) @ svd.components_
+        )
+
+        for i in range(nphi):
+            model_filtered = models_filtered[i] * a
+            model_filtered -= model_filtered.mean()
+            m2 = model_filtered.dot(model_filtered)
+            planet_signal = residuals[j, i]
+            f2 = planet_signal.dot(planet_signal)
+            R = model_filtered.dot(planet_signal)
+            CCF = R / np.sqrt(m2 * f2)
+            CCF_sum += CCF
+            loglikelihood_sum += -0.5 * npix * np.log((m2 + f2 - 2.0 * R) / npix)
+
+    return loglikelihood_sum, CCF_sum
+
+
+def loglikelihood_sysrem(
+    V_sys, K_p, d_phi, a, b, wl, planet_spectrum, data, star_spectrum=None
+):
+    """SysRem-based log-likelihood (Gibson 2021/2022).
+
+    Bit-equivalent port of POSEIDON `high_res.py:612-750`.
+    """
+    wl_grid = data["wl_grid"]
+    residuals = data["residuals"]
+    Bs = data["Bs"]
+    phi = data["phi"]
+    if star_spectrum is None:
+        transit_weight = data["transit_weight"]
+        max_transit_depth = np.max(1 - transit_weight)
+    else:
+        flux = data["flux"]
+        flux_star = flux - residuals
+
+    try:
+        V_bary = data["V_bary"]
+    except KeyError:
+        V_bary = np.zeros_like(phi)
+
+    uncertainties = data.get("uncertainties")
+
+    nord, nphi, npix = residuals.shape
+
+    N = residuals.size
+
+    radial_velocity_p = V_sys + V_bary + K_p * np.sin(2 * np.pi * (phi + d_phi))
+    radial_velocity_s = V_sys + V_bary + 0
+
+    delta_lambda_p = radial_velocity_p * 1e3 / constants.c
+    delta_lambda_s = radial_velocity_s * 1e3 / constants.c
+
+    loglikelihood_sum = 0
+    if b is not None:
+        loglikelihood_sum -= N * np.log(b)
+
+    for i in range(nord):
+        wl_slice = wl_grid[i]
+
+        models_shifted = np.zeros((nphi, npix))
+
+        for j in range(nphi):
+            wl_shifted_p = wl_slice * (1.0 - delta_lambda_p[j])
+            F_p = np.interp(wl_shifted_p, wl, planet_spectrum * a)
+            if star_spectrum is None:
+                models_shifted[j] = (1 - transit_weight[j]) / max_transit_depth * (
+                    -F_p
+                ) + 1
+                models_shifted[j] /= np.median(models_shifted[j])
+            else:
+                wl_shifted_s = wl_slice * (1.0 - delta_lambda_s[j])
+                F_s = np.interp(wl_shifted_s, wl, star_spectrum)
+                models_shifted[j] = F_p / F_s * flux_star[i, j]
+
+        B = Bs[i]
+        models_filtered = models_shifted - B @ models_shifted
+
+        if b is not None:
+            for j in range(nphi):
+                m = models_filtered[j] / uncertainties[i, j]
+                m2 = m.dot(m)
+                f = residuals[i, j] / uncertainties[i, j]
+                f2 = f.dot(f)
+                CCF = f.dot(m)
+                loglikelihood = -0.5 * (m2 + f2 - 2.0 * CCF) / (b**2)
+                loglikelihood_sum += loglikelihood
+
+        elif uncertainties is not None:
+            for j in range(nphi):
+                m = models_filtered[j] / uncertainties[i, j]
+                m2 = m.dot(m)
+                f = residuals[i, j] / uncertainties[i, j]
+                f2 = f.dot(f)
+                CCF = f.dot(m)
+                loglikelihood = -npix / 2 * np.log((m2 + f2 - 2.0 * CCF) / npix)
+                loglikelihood_sum += loglikelihood
+
+        else:
+            for j in range(nphi):
+                m = models_filtered[j]
+                m2 = m.dot(m)
+                f = residuals[i, j]
+                f2 = f.dot(f)
+                CCF = f.dot(m)
+                loglikelihood = -npix / 2 * np.log((m2 + f2 - 2.0 * CCF) / npix)
+                loglikelihood_sum += loglikelihood
+
+    return loglikelihood_sum
+
+
+def loglikelihood_high_res(
+    wl,
+    planet_spectrum,
+    star_spectrum,
+    data,
+    spectrum_type,
+    method,
+    high_res_params,
+    high_res_param_names,
+):
+    """Multi-dataset / multi-method log-likelihood dispatch.
+
+    Bit-equivalent port of POSEIDON `high_res.py:753-831`.
+    """
+    K_p = high_res_params[np.where(high_res_param_names == "K_p")[0][0]]
+    V_sys = high_res_params[np.where(high_res_param_names == "V_sys")[0][0]]
+
+    if "log_alpha_HR" in high_res_param_names:
+        a = (
+            10
+            ** high_res_params[np.where(high_res_param_names == "log_alpha_HR")[0][0]]
+        )
+    elif "alpha_HR" in high_res_param_names:
+        a = high_res_params[np.where(high_res_param_names == "alpha_HR")[0][0]]
+    else:
+        a = 1
+
+    if "Delta_phi" in high_res_param_names:
+        d_phi = high_res_params[np.where(high_res_param_names == "Delta_phi")[0][0]]
+    else:
+        d_phi = 0
+
+    if "W_conv" in high_res_param_names:
+        W_conv = high_res_params[np.where(high_res_param_names == "W_conv")[0][0]]
+    else:
+        W_conv = None
+
+    if "beta_HR" in high_res_param_names:
+        b = high_res_params[np.where(high_res_param_names == "beta_HR")[0][0]]
+    else:
+        b = None
+
+    if spectrum_type == "emission":
+        if W_conv is not None:
+            F_p = gaussian_filter1d(planet_spectrum, W_conv)
+            F_s = gaussian_filter1d(star_spectrum, W_conv)
+        else:
+            F_p = planet_spectrum
+            F_s = star_spectrum
+        loglikelihood = 0
+        for key in data.keys():
+            if method == "sysrem":
+                loglikelihood += loglikelihood_sysrem(
+                    V_sys, K_p, d_phi, a, b, wl, F_p, data[key], F_s
+                )
+            elif method == "PCA":
+                loglikelihood, _ = loglikelihood_PCA(
+                    V_sys, K_p, d_phi, a, wl, F_p, F_s, data[key]
+                )
+            else:
+                raise Exception(
+                    "Emission spectroscopy only supports sysrem and PCA for now."
+                )
+        return loglikelihood
+
+    elif spectrum_type == "transmission":
+        if method != "sysrem":
+            raise Exception(
+                "Transmission spectroscopy only supports fast filtering with "
+                "sysrem (Gibson et al. 2022)."
+            )
+        if W_conv is not None:
+            F_p = gaussian_filter1d(planet_spectrum, W_conv)
+        else:
+            F_p = planet_spectrum
+        loglikelihood = 0
+        for key in data.keys():
+            loglikelihood += loglikelihood_sysrem(
+                V_sys, K_p, d_phi, a, b, wl, F_p, data[key]
+            )
+        return loglikelihood
+    else:
+        raise Exception("Spectrum type should be 'emission' or 'transmission'.")
+
+
+def make_injection_data(
+    data,
+    data_dir,
+    name,
+    wl,
+    planet_spectrum,
+    K_p,
+    V_sys,
+    method,
+    a=None,
+    continuum=None,
+    W_conv=None,
+    star_spectrum=None,
+):
+    """Inject a forward-model spectrum into raw flux and re-prepare.
+
+    Bit-equivalent port of POSEIDON `high_res.py:902-958`.
+    """
+    residuals = data["residuals"]
+    flux = data["flux"]
+    wl_grid = data["wl_grid"]
+    phi = data["phi"]
+
+    nord, nphi, npix = residuals.shape
+    if continuum is not None and a is not None:
+        planet_spectrum = (planet_spectrum - continuum) * a + continuum
+    if W_conv is not None:
+        planet_spectrum = gaussian_filter1d(planet_spectrum, W_conv)
+    emission = star_spectrum is not None
+
+    if emission:
+        spectrum_type = "emission"
+        if W_conv is not None:
+            star_spectrum = gaussian_filter1d(star_spectrum, W_conv)
+        transit_weight = None
+    else:
+        spectrum_type = "transmission"
+        transit_weight = data["transit_weight"]
+        max_transit_depth = np.max(1 - transit_weight)
+    radial_velocity = V_sys + K_p * np.sin(2 * np.pi * phi)
+    delta_lambda = radial_velocity * 1e3 / constants.c
+
+    F_p_F_s = np.zeros((nord, nphi, npix))
+    F_p = np.zeros((nord, nphi, npix))
+
+    for i in range(nord):
+        wl_slice = wl_grid[i].copy()
+        for j in range(nphi):
+            wl_shifted_p = wl_slice * (1.0 - delta_lambda[j])
+            if emission:
+                F_p_F_s[i, j, :] = np.interp(
+                    wl_shifted_p, wl, planet_spectrum
+                ) / np.interp(wl_slice, wl, star_spectrum)
+            else:
+                F_p[i, j, :] = (
+                    -np.interp(wl_shifted_p, wl, planet_spectrum)
+                    * (1 - transit_weight[j])
+                    / max_transit_depth
+                    + 1
+                )
+
+    if emission:
+        data_injected = (1 + F_p_F_s) * (flux - residuals)
+    else:
+        data_injected = F_p * flux
+
+    if method.lower() == "pca":
+        uncertainties = None
+    elif method.lower() == "sysrem":
+        uncertainties = fit_uncertainties(
+            data_injected, initial_guess=[0.1, np.mean(data_injected)]
+        )
+
+    prepare_high_res_data(
+        data_dir,
+        name,
+        spectrum_type,
+        method,
+        data_injected,
+        wl_grid,
+        phi,
+        uncertainties,
+        transit_weight,
+    )
+
+    return
 
 
 def remove_outliers(wl_grid, flux):

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jaxposeidon"
-version = "0.0.29"
+version = "0.0.30"
 description = "JAX-native port of POSEIDON's transmission-spectroscopy forward model."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -75,6 +75,10 @@ ignore = [
 # POSEIDON-mirror module — verbatim port of contributions.py keeps the
 # original branch structure and condition ordering for review parity.
 "jaxposeidon/_contributions.py" = ["SIM109", "SIM114", "SIM300"]
+# POSEIDON-mirror module — verbatim port of high_res.py keeps the
+# original branch structure, condition ordering, mutable defaults and
+# loop-bound closures for review parity.
+"jaxposeidon/_high_res.py" = ["SIM102", "SIM300", "B006", "B023"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
