@@ -408,6 +408,32 @@ def test_TRIDENT_jit_nonzero_y_p_matches_POSEIDON():
     np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
 
 
+def test_TRIDENT_jit_enable_haze_nonzero_cloud_matches_POSEIDON():
+    atm = _canonical_1D_atmosphere()
+    atm["kappa_cloud"] = 3.0e-6 * np.ones_like(atm["kappa_cloud"])
+    args = _trident_kwargs(atm, enable_haze=1)
+    ours = _run_under_jit(args)
+    ref = _poseidon_TRIDENT(args)
+    np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
+
+
+def test_compute_transmission_spectrum_jit_enable_haze_nonzero_cloud_matches_POSEIDON():
+    atm = _canonical_1D_atmosphere()
+    atm["kappa_cloud"] = 3.0e-6 * np.ones_like(atm["kappa_cloud"])
+    kwargs = _trident_kwargs(atm, enable_haze=1)
+    kappa_gas = 0.5 * atm["kappa_clear"]
+    kappa_Ray = 0.5 * atm["kappa_clear"]
+    ours = _run_jit_helper(atm, kwargs, kappa_gas, kappa_Ray)
+    ref = _poseidon_TRIDENT(
+        {
+            **kwargs,
+            "kappa_clear": atm["kappa_clear"],
+            "kappa_cloud": kwargs["kappa_cloud"],
+        }
+    )
+    np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
+
+
 def test_compute_transmission_spectrum_jit_make_jaxpr_succeeds():
     atm = _canonical_1D_atmosphere(N_layers=10, N_wl=5)
     kwargs = _trident_kwargs(atm)

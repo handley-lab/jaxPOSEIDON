@@ -21,10 +21,13 @@ Matches POSEIDON's NaN-spectrum rejection sentinel
 non-physical upstream.
 """
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
-from jaxposeidon._emission import (
+jax.config.update("jax_enable_x64", True)
+
+from jaxposeidon._emission import (  # noqa: E402
     assign_assumptions_and_compute_single_stream_emission,
     build_surf_reflect,
     determine_photosphere_radii,
@@ -32,10 +35,10 @@ from jaxposeidon._emission import (
     emission_Toon,
     reflection_Toon,
 )
-from jaxposeidon._jax_transmission import TRIDENT_callback
-from jaxposeidon._lbl import extinction_LBL
-from jaxposeidon._opacities import extinction
-from jaxposeidon._transmission import TRIDENT
+from jaxposeidon._jax_transmission import TRIDENT_callback  # noqa: E402
+from jaxposeidon._lbl import extinction_LBL  # noqa: E402
+from jaxposeidon._opacities import extinction  # noqa: E402
+from jaxposeidon._transmission import TRIDENT  # noqa: E402
 
 
 def check_atmosphere_physical(atmosphere, opac):

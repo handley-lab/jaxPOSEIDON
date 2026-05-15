@@ -47,7 +47,8 @@ The shipped v1-C entry point (`_jax_transmission.TRIDENT_callback`,
 `_compute_spectrum.compute_transmission_spectrum_jit`) wraps the
 full numpy `_transmission.TRIDENT` in `jax.pure_callback`. This is
 fully traceable under `jax.jit` and `jax.make_jaxpr` (the v1-C gate
-requirement) and bit-exact with POSEIDON to within float64 precision
+requirement, scoped to the
+`compute_transmission_spectrum_jit` helper) and bit-exact with POSEIDON to within float64 precision
 (parity tests at `rtol=1e-13, atol=1e-15`, satisfying the v1-C gate
 "matches numpy at `rtol=1e-13` default" -- the underlying callback
 materialises the numpy `_transmission.TRIDENT` output verbatim, so
