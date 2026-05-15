@@ -10,4 +10,9 @@ already holds the species masses table extracted at Phase 2).
 Phase 3+ did not require a build-time constants extraction beyond
 species masses; this module remains as a stable import path
 documented in the plan's architecture tree.
+
+Speed of light is included as the SI-exact CODATA value matching
+POSEIDON's `scipy.constants.c` usage in `high_res.py`.
 """
+
+C_M_PER_S = 299792458.0
