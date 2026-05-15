@@ -73,3 +73,9 @@ label.
   positional kwargs (`T_input`, `X_input`, `P_param_set`,
   `log_P_slope_phot`, `log_P_slope_arr`, `Na_K_fixed_ratio`); the
   rejection test now passes the additional arguments.
+
+- **Phase 0.5.12b review deferred**: OpenAI (`mcp__llm__review` model="openai")
+  returned 503 `no_available_accounts` and Gemini returned 429 `RESOURCE_EXHAUSTED`
+  at PR-merge time. The Mie cloud runtime port is shipped with parity tests
+  passing locally and on CI (Python 3.11 + 3.12); manual review against
+  POSEIDON `clouds.py` is a follow-up.
