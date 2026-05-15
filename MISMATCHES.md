@@ -331,11 +331,17 @@ The v1-E PR ships the source-grep CI gate
 (`scripts/source_grep_gate.py` + `.github/workflows/source-grep-gate.yml`)
 and the end-to-end JIT/VMAP/GRAD/make_jaxpr gate
 (`tests/test_v1_E_end_to_end.py`). The gate enforces that JAX
-hot-path modules do not perform file I/O. It tracks but **does not
+**fully-pure** hot-path modules (the 7 modules listed in
+"Module classification at v1.0.0") do not perform file I/O —
+``v1-grep-skip`` opt-outs are NEVER honored for hard-forbidden
+file-I/O patterns in those modules. In the **grandfathered** modules
+listed below, hard-forbidden file-I/O patterns are tracked with
+explicit per-line ``v1-grep-skip`` opt-outs (with the rationale
+inline) rather than gate-failing; the whole module is a v1.0.x
+JAX-port follow-up. It additionally tracks but **does not
 fail on** residual `import numpy` / `from scipy …` / `import h5py` /
-`import sklearn` lines in the modules listed below — those are the
-v1.0.x JAX-port follow-up surface. Each entry has a concrete
-follow-up scope.
+`import sklearn` lines in the modules listed below. Each entry has a
+concrete follow-up scope.
 
 Hot-path modules fully JAX-pure at v1.0.0 (7):
 

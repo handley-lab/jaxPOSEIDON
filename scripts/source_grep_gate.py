@@ -263,7 +263,8 @@ def main() -> int:
         print(
             f"  Grandfathered (v1.0.x follow-up; {len(grandfather_counts)} "
             "modules, numpy/scipy/h5py/sklearn imports reported but not "
-            "enforced — file-I/O is enforced):"
+            "enforced — file-I/O is tracked with explicit per-line "
+            "v1-grep-skip opt-outs):"
         )
         for name, count in sorted(grandfather_counts.items()):
             print(f"    {name}: {count} forbidden import(s)")
