@@ -25,7 +25,15 @@ def open_opacity_files(opacity_database="High-T", database_version="1.3"):
     `absorption.py:1794-1818`. Returns `(opac_file, cia_file)` open
     h5py.File handles. Caller is responsible for closing them.
     """
-    input_file_path = os.environ["POSEIDON_input_data"]  # noqa: SIM112
+    input_file_path = os.environ.get("POSEIDON_input_data")  # noqa: SIM112
+    if input_file_path is None:
+        # Mirrors POSEIDON `absorption.py:1785-1791`.
+        raise Exception(
+            "POSEIDON cannot locate the opacity input data.\n"
+            "Please set the 'POSEIDON_input_data' variable in "
+            "your .bashrc or .bash_profile to point to the "
+            "directory containing the POSEIDON opacity database."
+        )
 
     if opacity_database == "High-T":
         if database_version == "1.3":

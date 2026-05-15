@@ -370,6 +370,151 @@ def test_compute_spectrum_dispatches_line_by_line(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Additional coverage: ff/bf, haze, deck, out-of-range wavenumbers,
+# multi-sector/zone documented limitation.
+# ---------------------------------------------------------------------------
+def test_extinction_LBL_haze_and_deck_matches_poseidon(tmp_path, monkeypatch):
+    """Parity with enable_haze=1 / enable_deck=1 (MacMad17 cloud contributions)."""
+    from POSEIDON.absorption import extinction_LBL as p_extLBL
+
+    monkeypatch.setenv("POSEIDON_input_data", str(tmp_path))
+    call_args = _build_minimal_call(tmp_path, seed=21)
+    call_args["enable_haze"] = 1
+    call_args["enable_deck"] = 1
+
+    kg_ours, kr_ours, kc_ours = _lbl.extinction_LBL(**call_args)
+    kg_t, kr_t, kc_t = p_extLBL(**call_args)
+
+    np.testing.assert_allclose(kg_ours, kg_t, atol=1e-50, rtol=1e-5)
+    np.testing.assert_allclose(kr_ours, kr_t, atol=0, rtol=1e-13)
+    np.testing.assert_allclose(kc_ours, kc_t, atol=0, rtol=1e-13)
+    # Haze + deck contributions are nonzero.
+    assert np.any(kc_ours > 0.0)
+
+
+def test_extinction_LBL_ff_bf_matches_poseidon(tmp_path, monkeypatch):
+    """Parity with H-minus free-free + bound-free included."""
+    from POSEIDON.absorption import extinction_LBL as p_extLBL
+
+    monkeypatch.setenv("POSEIDON_input_data", str(tmp_path))
+    call_args = _build_minimal_call(tmp_path, seed=23)
+    N_layers = len(call_args["P"])
+
+    # Add a tiny H- + e- contribution.
+    call_args["ff_pairs"] = ["H-ff"]
+    call_args["bf_species"] = ["H-bf"]
+    call_args["X_ff"] = np.full((2, 1, N_layers, 1, 1), 1.0e-5)
+    call_args["X_bf"] = np.full((1, N_layers, 1, 1), 1.0e-5)
+
+    kg_ours, kr_ours, kc_ours = _lbl.extinction_LBL(**call_args)
+    kg_t, kr_t, kc_t = p_extLBL(**call_args)
+
+    np.testing.assert_allclose(kg_ours, kg_t, atol=1e-50, rtol=1e-5)
+    np.testing.assert_allclose(kr_ours, kr_t, atol=0, rtol=1e-13)
+    np.testing.assert_allclose(kc_ours, kc_t, atol=0, rtol=1e-13)
+
+
+def test_interpolate_cia_LBL_out_of_range_wavenumbers_matches_poseidon():
+    """nu_model points outside nu_cia map to z==0 / z==N-1; output is zero
+    at those wavelengths."""
+    from POSEIDON.absorption import (
+        T_interpolation_init as p_init,
+        interpolate_cia_LBL as p_cia,
+    )
+
+    N_T_cia = 6
+    N_nu_cia = 40
+    T_grid_cia = np.linspace(200.0, 2000.0, N_T_cia)
+    # Narrow nu_cia grid so the wider nu_model overflows both edges.
+    nu_cia = np.linspace(4000.0, 6000.0, N_nu_cia)
+    rng = np.random.default_rng(31)
+    log_cia = rng.uniform(-45.0, -40.0, size=(N_T_cia, N_nu_cia)).astype(np.float32)
+
+    wl_model = np.linspace(0.5, 10.0, 80)  # spans well past nu_cia bounds
+    nu_model = (1.0e4 / wl_model)[::-1]
+    N_wl, N_nu = len(wl_model), len(nu_model)
+    P = np.logspace(1, -5, 6)
+    T = np.full(len(P), 800.0)
+
+    y = np.zeros(len(P), dtype=np.int64)
+    w_T = _lbl.T_interpolation_init(len(P), T_grid_cia, T, y)
+    y_p = np.zeros(len(P), dtype=np.int64)
+    _ = p_init(len(P), T_grid_cia, T, y_p)
+
+    out_ours = _lbl.interpolate_cia_LBL(
+        P, log_cia, nu_model, nu_cia, T, T_grid_cia, N_T_cia, N_wl, N_nu, y, w_T
+    )
+    out_theirs = p_cia(
+        P, log_cia, nu_model, nu_cia, T, T_grid_cia, N_T_cia, N_wl, N_nu, y_p, w_T
+    )
+    np.testing.assert_allclose(out_ours, out_theirs, atol=1e-50, rtol=1e-5)
+    # Some wavelengths must have hit the z==0 or z==N-1 branch (output 0).
+    assert np.any(out_ours == 0.0)
+
+
+def test_interpolate_sigma_LBL_out_of_range_wavenumbers_matches_poseidon():
+    """nu_model points outside [nu_opac_min, nu_opac_max] yield sigma == 0."""
+    from POSEIDON.absorption import (
+        T_interpolation_init as p_init,
+        interpolate_sigma_LBL as p_sigma,
+    )
+
+    N_T = 6
+    N_P = 5
+    N_nu_opac = 80
+    T_grid = np.linspace(200.0, 2000.0, N_T)
+    log_P_grid = np.linspace(-6.0, 2.0, N_P)
+    nu_opac = np.linspace(4000.0, 6000.0, N_nu_opac)  # narrow
+    rng = np.random.default_rng(33)
+    log_sigma = rng.uniform(-25.0, -20.0, size=(N_P, N_T, N_nu_opac)).astype(np.float32)
+
+    wl_model = np.linspace(0.5, 10.0, 80)
+    nu_model = (1.0e4 / wl_model)[::-1]
+    N_wl, N_nu = len(wl_model), len(nu_model)
+    P = np.logspace(1, -5, 6)
+    T = np.full(len(P), 800.0)
+
+    y = np.zeros(len(P), dtype=np.int64)
+    w_T = _lbl.T_interpolation_init(len(P), T_grid, T, y)
+    y_p = np.zeros(len(P), dtype=np.int64)
+    _ = p_init(len(P), T_grid, T, y_p)
+
+    out_ours = _lbl.interpolate_sigma_LBL(
+        log_sigma,
+        nu_model,
+        nu_opac,
+        P,
+        T,
+        log_P_grid,
+        T_grid,
+        N_T,
+        N_P,
+        N_wl,
+        N_nu,
+        y,
+        w_T,
+    )
+    out_theirs = p_sigma(
+        log_sigma,
+        nu_model,
+        nu_opac,
+        P,
+        T,
+        log_P_grid,
+        T_grid,
+        N_T,
+        N_P,
+        N_wl,
+        N_nu,
+        y_p,
+        w_T,
+    )
+    np.testing.assert_allclose(out_ours, out_theirs, atol=1e-50, rtol=1e-5)
+    # Some wavelengths fall outside the opacity wavenumber grid -> 0.
+    assert np.any(out_ours == 0.0)
+
+
+# ---------------------------------------------------------------------------
 # Env-gated smoke test: runs against the real $POSEIDON_input_data if set.
 # ---------------------------------------------------------------------------
 @pytest.mark.skipif(

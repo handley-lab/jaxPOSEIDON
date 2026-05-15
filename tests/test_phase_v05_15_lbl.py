@@ -247,7 +247,9 @@ def test_compute_kappa_LBL_disable_continuum_zeroes_Rayleigh():
 
 def test_open_opacity_files_requires_env_var(monkeypatch):
     monkeypatch.delenv("POSEIDON_input_data", raising=False)
-    with pytest.raises(KeyError):
+    with pytest.raises(
+        Exception, match="POSEIDON cannot locate the opacity input data"
+    ):
         _lbl_table_loader.open_opacity_files()
 
 

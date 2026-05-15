@@ -351,6 +351,12 @@ def extinction_LBL(
     via `interpolate_cia_LBL` / `interpolate_sigma_LBL` and the H-minus
     free-free / bound-free fits, then accumulates kappa via
     `compute_kappa_LBL`.
+
+    Note: POSEIDON closes the CIA and opacity HDF5 files inside the
+    `(N_sectors, N_zones)` loop body (a known upstream quirk); this port
+    preserves the same behaviour for bit-equivalence. As a result the
+    LBL path supports only `N_sectors == N_zones == 1` until upstream
+    moves the closes outside the loop.
     """
     if not suppress_print:
         print("Reading in cross sections in line-by-line mode...")

@@ -225,10 +225,10 @@ def compute_spectrum(
             N_sectors=N_sectors,
             N_zones=N_zones,
             P_surf=P_surf,
-            opacity_database=opac.get("opacity_database", "High-T"),
+            opacity_database=opac["opacity_database"],
             disable_continuum=disable_continuum,
             suppress_print=suppress_print,
-            database_version=opac.get("database_version", "1.3"),
+            database_version=opac["database_version"],
         )
     else:
         sigma_stored = opac["sigma_stored"]
