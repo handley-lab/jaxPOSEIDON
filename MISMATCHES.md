@@ -47,8 +47,21 @@ The shipped v1-C entry point (`_jax_transmission.TRIDENT_callback`,
 `_compute_spectrum.compute_transmission_spectrum_jit`) wraps the
 full numpy `_transmission.TRIDENT` in `jax.pure_callback`. This is
 fully traceable under `jax.jit` and `jax.make_jaxpr` (the v1-C gate
-requirement) and bit-exact with POSEIDON (parity tests pass at
-`rtol=0, atol=0`). The relaxation is:
+requirement) and bit-exact with POSEIDON to within float64 precision
+(parity tests at `rtol=1e-13, atol=1e-15`, satisfying the v1-C gate
+"matches numpy at `rtol=1e-13` default" -- the underlying callback
+materialises the numpy `_transmission.TRIDENT` output verbatim, so
+the residual is purely the JAX float64 round-trip).
+
+The public `compute_spectrum(..., spectrum_type='transmission', ...)`
+still calls the numpy `_transmission.TRIDENT` directly (its Python
+body has string-dispatch and v0.5 numpy-only branches that are not
+JIT-traceable as-is). The v1-C plan row's "jit-able entry point"
+requirement is met by the dedicated
+`compute_transmission_spectrum_jit` helper; the full
+`compute_spectrum` re-wiring is deferred to v1-D (which lifts the
+emission/dispatch surface) and the v1-E end-to-end gate. The
+relaxations are:
 
 - `jax.grad` through `TRIDENT_callback` requires a custom VJP rule
   (not provided by `pure_callback`). This is deferred to v1-E,
