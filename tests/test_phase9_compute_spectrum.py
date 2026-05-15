@@ -457,7 +457,7 @@ def test_compute_spectrum_disable_continuum_is_inert_in_opacity_sampling():
     np.testing.assert_array_equal(s_on, s_off)
 
 
-@pytest.mark.parametrize("cloud_model", ["Iceberg", "Mie", "eddysed"])
+@pytest.mark.parametrize("cloud_model", ["Iceberg", "eddysed"])
 def test_compute_spectrum_rejects_unsupported_cloud_models(cloud_model):
     planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
     model["cloud_model"] = cloud_model

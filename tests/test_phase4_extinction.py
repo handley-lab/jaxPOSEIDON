@@ -135,12 +135,13 @@ def test_extinction_matches_poseidon(enable_haze, enable_deck):
         np.testing.assert_allclose(a, b, atol=1e-22, rtol=1e-13)
 
 
-def test_extinction_rejects_Mie():
-    cfg = _set_up_extinction()
-    cfg["enable_Mie"] = 1
-    with pytest.raises(NotImplementedError, match="Mie"):
-        extinction(**cfg)
+# Phase 0.5.13d: enable_surface=1 is now supported (see
+# tests/test_phase_v05_13d_surface_runtime.py); the v0 rejection test for
+# enable_surface non-zero is obsolete.
 
+# Phase 0.5.12b: enable_Mie=1 is now supported (see
+# tests/test_phase_v05_12b_mie_runtime.py); the v0 rejection test for
+# enable_Mie non-zero is obsolete.
 
 # Phase 0.5.4: H-minus ff/bf are now ported (see _h_minus.py +
 # tests/test_phase_v05_4_h_minus.py); the v0 rejection tests for

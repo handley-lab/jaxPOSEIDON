@@ -46,9 +46,19 @@ def check_atmosphere_physical(atmosphere, opac):
     return True
 
 
-_V0_CLOUD_MODELS = {"cloud-free", "MacMad17"}
+_V0_CLOUD_MODELS = {"cloud-free", "MacMad17", "Mie"}
 _V0_CLOUD_TYPES = {"deck", "haze", "deck_haze"}
 _V0_CLOUD_DIMS = {1, 2}
+_V05_MIE_CLOUD_TYPES = {
+    "uniform_X",
+    "slab",
+    "fuzzy_deck",
+    "opaque_deck_plus_uniform_X",
+    "opaque_deck_plus_slab",
+    "fuzzy_deck_plus_slab",
+    "one_slab",
+}
+_MIE_OPAQUE_DECK_TYPES = {"opaque_deck_plus_uniform_X", "opaque_deck_plus_slab"}
 
 
 def compute_spectrum(
@@ -129,6 +139,17 @@ def compute_spectrum(
             raise NotImplementedError(
                 f"cloud_dim={cloud_dim!r} is v1 (v0 supports {sorted(_V0_CLOUD_DIMS)})"
             )
+    if cloud_model == "Mie":
+        cloud_type = model.get("cloud_type", "")
+        if cloud_type not in _V05_MIE_CLOUD_TYPES:
+            raise NotImplementedError(
+                f"Mie cloud_type={cloud_type!r} is v1 (v0.5.12b supports "
+                f"{sorted(_V05_MIE_CLOUD_TYPES)})"
+            )
+        if model.get("cloud_dim", 1) != 1:
+            raise NotImplementedError(
+                "Mie cloud_dim != 1 (patchy Mie) deferred to a follow-up"
+            )
 
     # --- physical-atmosphere check is the LAST guard before computation ---
     if not disable_atmosphere and not check_atmosphere_physical(atmosphere, opac):
@@ -197,10 +218,41 @@ def compute_spectrum(
         if ("deck" in model["cloud_type"] and "Mie" not in model["cloud_model"])
         else 0
     )
+    enable_Mie = 1 if cloud_model == "Mie" else 0
 
-    # Placeholders for the v0 envelope (no Mie aerosols).
-    n_aerosol = np.array([np.zeros_like(r)])
-    sigma_ext_cloud = np.array([np.zeros_like(wl)])
+    if cloud_model == "Mie":
+        from jaxposeidon._clouds import Mie_cloud
+
+        H = atmosphere["H"]
+        r_m = atmosphere["r_m"]
+        log_n_max = atmosphere["log_n_max"]
+        fractional_scale_height = atmosphere["fractional_scale_height"]
+        log_X_Mie = atmosphere["log_X_Mie"]
+        P_cloud_bottom = atmosphere["P_cloud_bottom"]
+        aerosol_species = atmosphere["aerosol_species"]
+        aerosol_stored = opac["aerosol_stored"]
+        n_aerosol_list, sigma_ext_list, _g_cloud, _w_cloud = Mie_cloud(
+            P=P,
+            wl=wl,
+            r=r,
+            H=H,
+            n=n,
+            r_m=r_m,
+            aerosol_species=aerosol_species,
+            cloud_type=model["cloud_type"],
+            aerosol_grid=aerosol_stored,
+            P_cloud=P_cloud,
+            log_n_max=log_n_max,
+            fractional_scale_height=fractional_scale_height,
+            log_X_Mie=log_X_Mie,
+            P_cloud_bottom=P_cloud_bottom,
+        )
+        n_aerosol = np.array(n_aerosol_list)
+        sigma_ext_cloud = np.array(sigma_ext_list)
+    else:
+        # Placeholders for the non-Mie cloud envelope.
+        n_aerosol = np.array([np.zeros_like(r)])
+        sigma_ext_cloud = np.array([np.zeros_like(wl)])
 
     if not isinstance(P_cloud, np.ndarray):
         P_cloud = np.array([P_cloud])
@@ -291,7 +343,7 @@ def compute_spectrum(
             T_fine=T_fine,
             log_P_fine=log_P_fine,
             P_surf=P_surf,
-            enable_Mie=0,
+            enable_Mie=enable_Mie,
             n_aerosol_array=n_aerosol,
             sigma_Mie_array=sigma_ext_cloud,
         )
@@ -376,7 +428,10 @@ def compute_spectrum(
         elif disable_atmosphere:
             R_p_eff = R_p_ref
         else:
-            R_p_eff = planet["planet_radius"]
+            if disable_atmosphere:
+                R_p_eff = R_p_ref
+            else:
+                R_p_eff = planet["planet_radius"]
 
         d = planet.get("system_distance")
         if d is None:
