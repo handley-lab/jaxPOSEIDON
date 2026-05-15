@@ -286,12 +286,17 @@ def test_spectral_Mie_no_opaque_matches_poseidon(opts):
         },
         {
             "cloud_contribution": True,
+            "cloud_species": "Fe",
+            "layer_to_ignore": 7,
+        },
+        {
+            "cloud_contribution": True,
             "cloud_total_contribution": True,
             "layer_to_ignore": 8,
         },
         {"total_pressure_contribution": True, "layer_to_ignore": 6},
     ],
-    ids=["gas-H2O", "cloud-MgSiO3", "cloud-total", "total"],
+    ids=["gas-H2O", "cloud-MgSiO3", "cloud-Fe", "cloud-total", "total"],
 )
 def test_pressure_Mie_no_opaque_matches_poseidon(opts):
     cfg = _setup(opaque=False)
@@ -335,12 +340,17 @@ def test_spectral_Mie_opaque_matches_poseidon(opts):
         },
         {
             "cloud_contribution": True,
+            "cloud_species": "Fe",
+            "layer_to_ignore": 7,
+        },
+        {
+            "cloud_contribution": True,
             "cloud_total_contribution": True,
             "layer_to_ignore": 8,
         },
         {"total_pressure_contribution": True, "layer_to_ignore": 6},
     ],
-    ids=["gas-H2O", "cloud-MgSiO3", "cloud-total", "total"],
+    ids=["gas-H2O", "cloud-MgSiO3", "cloud-Fe", "cloud-total", "total"],
 )
 def test_pressure_Mie_opaque_matches_poseidon(opts):
     cfg = _setup(opaque=True)
@@ -373,6 +383,139 @@ def test_pressure_surface_and_Mie_matches_poseidon():
     cfg["enable_Mie"] = 1
     cfg["enable_haze"] = 1
     cfg["enable_deck"] = 1
+    opts = {"total_pressure_contribution": True, "layer_to_ignore": 6}
+    ours = extinction_pressure_contribution(**cfg, **opts)
+    theirs = _call_poseidon_press(cfg, **opts)
+    for a, b in zip(ours, theirs):
+        _assert_close(a, b)
+
+
+# ---- unknown cloud_species (numba-default-zero parity) ----------------------
+
+
+def test_spectral_Mie_unknown_cloud_species_matches_poseidon():
+    """POSEIDON's numba kernel leaves ``aerosol_species_index`` undefined
+    when ``cloud_species`` is not in ``aerosol_species``; numba defaults
+    the local to 0, matching this port's explicit initialisation.
+    """
+    cfg = _setup(opaque=False)
+    cfg["enable_Mie"] = 1
+    opts = {"cloud_contribution": True, "cloud_species": "NotPresent"}
+    ours = extinction_spectral_contribution(**cfg, **opts)
+    theirs = _call_poseidon_spec(cfg, **opts)
+    for a, b in zip(ours, theirs):
+        _assert_close(a, b)
+
+
+def test_pressure_Mie_unknown_cloud_species_matches_poseidon():
+    cfg = _setup(opaque=False)
+    cfg["enable_Mie"] = 1
+    opts = {
+        "cloud_contribution": True,
+        "cloud_species": "NotPresent",
+        "layer_to_ignore": 7,
+    }
+    ours = extinction_pressure_contribution(**cfg, **opts)
+    theirs = _call_poseidon_press(cfg, **opts)
+    for a, b in zip(ours, theirs):
+        _assert_close(a, b)
+
+
+# ---- multi-sector / multi-zone parity ---------------------------------------
+
+
+def _setup_multi(N_sectors=2, N_zones=3, opaque=False, **kw):
+    cfg = _setup(opaque=opaque, **kw)
+    N_layers = cfg["n"].shape[0]
+    N_aerosol = cfg["sigma_Mie_array"].shape[0]
+    cfg["N_sectors"] = N_sectors
+    cfg["N_zones"] = N_zones
+    rng = np.random.default_rng(42)
+    cfg["T"] = 1000.0 + 200.0 * rng.standard_normal((N_layers, N_sectors, N_zones))
+    cfg["n"] = rng.uniform(1e15, 1e25, size=(N_layers, N_sectors, N_zones))
+    X = np.zeros((4, N_layers, N_sectors, N_zones))
+    X[0] = 0.84
+    X[1] = 0.149
+    X[2] = 0.005
+    X[3] = 0.006
+    cfg["X"] = X
+    cfg["X_active"] = X[2:4]
+    X_cia = np.zeros((2, 2, N_layers, N_sectors, N_zones))
+    X_cia[0, 0] = X[0]
+    X_cia[1, 0] = X[0]
+    X_cia[0, 1] = X[0]
+    X_cia[1, 1] = X[1]
+    cfg["X_cia"] = X_cia
+    cfg["X_ff"] = np.zeros((2, 0, N_layers, N_sectors, N_zones))
+    cfg["X_bf"] = np.zeros((0, N_layers, N_sectors, N_zones))
+    if opaque:
+        cfg["n_aerosol_array"] = rng.uniform(
+            1.0, 1e3, size=(N_aerosol + 1, N_layers, N_sectors, N_zones)
+        )
+    else:
+        cfg["n_aerosol_array"] = rng.uniform(
+            1.0, 1e3, size=(N_aerosol, N_layers, N_sectors, N_zones)
+        )
+    return cfg
+
+
+def test_spectral_surface_multi_sector_zone():
+    cfg = _setup_multi()
+    cfg["enable_surface"] = 1
+    opts = {"contribution_species": "H2O"}
+    ours = extinction_spectral_contribution(**cfg, **opts)
+    theirs = _call_poseidon_spec(cfg, **opts)
+    for a, b in zip(ours, theirs):
+        _assert_close(a, b)
+
+
+def test_spectral_Mie_no_opaque_multi_sector_zone():
+    cfg = _setup_multi(opaque=False)
+    cfg["enable_Mie"] = 1
+    opts = {"cloud_contribution": True, "cloud_species": "Fe"}
+    ours = extinction_spectral_contribution(**cfg, **opts)
+    theirs = _call_poseidon_spec(cfg, **opts)
+    for a, b in zip(ours, theirs):
+        _assert_close(a, b)
+
+
+def test_spectral_Mie_opaque_multi_sector_zone():
+    cfg = _setup_multi(opaque=True)
+    cfg["enable_Mie"] = 1
+    opts = {"cloud_contribution": True, "cloud_total_contribution": True}
+    ours = extinction_spectral_contribution(**cfg, **opts)
+    theirs = _call_poseidon_spec(cfg, **opts)
+    for a, b in zip(ours, theirs):
+        _assert_close(a, b)
+
+
+def test_pressure_surface_multi_sector_zone():
+    cfg = _setup_multi()
+    cfg["enable_surface"] = 1
+    opts = {"total_pressure_contribution": True, "layer_to_ignore": 6}
+    ours = extinction_pressure_contribution(**cfg, **opts)
+    theirs = _call_poseidon_press(cfg, **opts)
+    for a, b in zip(ours, theirs):
+        _assert_close(a, b)
+
+
+def test_pressure_Mie_no_opaque_multi_sector_zone():
+    cfg = _setup_multi(opaque=False)
+    cfg["enable_Mie"] = 1
+    opts = {
+        "cloud_contribution": True,
+        "cloud_species": "Fe",
+        "layer_to_ignore": 7,
+    }
+    ours = extinction_pressure_contribution(**cfg, **opts)
+    theirs = _call_poseidon_press(cfg, **opts)
+    for a, b in zip(ours, theirs):
+        _assert_close(a, b)
+
+
+def test_pressure_Mie_opaque_multi_sector_zone():
+    cfg = _setup_multi(opaque=True)
+    cfg["enable_Mie"] = 1
     opts = {"total_pressure_contribution": True, "layer_to_ignore": 6}
     ours = extinction_pressure_contribution(**cfg, **opts)
     theirs = _call_poseidon_press(cfg, **opts)
