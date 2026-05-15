@@ -50,7 +50,7 @@ V05_X_PROFILES = frozenset(
     }
 )
 V0_CLOUD_MODELS = frozenset({"cloud-free", "MacMad17"})
-V05_CLOUD_MODELS = frozenset({"cloud-free", "MacMad17", "Mie"})
+V05_CLOUD_MODELS = frozenset({"cloud-free", "MacMad17", "Mie", "eddysed"})
 V0_CLOUD_TYPES = frozenset({"deck", "haze", "deck_haze"})
 V05_MIE_CLOUD_TYPES = frozenset(
     {
@@ -207,10 +207,11 @@ def assert_v0_model_config(
     # internally at retrieval time. No setup-layer rejection here.
     if opaque_Iceberg:
         raise NotImplementedError("Iceberg aerosols are deferred to v1")
-    if list(aerosol_species) and cloud_model != "Mie":
+    if list(aerosol_species) and cloud_model not in ("Mie", "eddysed"):
         raise NotImplementedError(
-            "aerosol_species is only valid with cloud_model='Mie'; "
-            "Iceberg/eddysed aerosol parameter paths are deferred to v1"
+            "aerosol_species is only valid with cloud_model='Mie' or "
+            "cloud_model='eddysed'; Iceberg aerosol parameter paths are "
+            "deferred to v1"
         )
     if list(species_EM_gradient) or list(species_DN_gradient):
         raise NotImplementedError(
@@ -505,6 +506,14 @@ def assign_free_params(
             cloud_params += ["log_P_top_slab", "Delta_log_P"]
             for aerosol in aerosol_species:
                 cloud_params += [f"log_r_m_{aerosol}", f"log_X_{aerosol}"]
+    elif cloud_model == "eddysed":
+        if cloud_dim == 2:
+            cloud_params += ["f_cloud"]
+        cloud_params += [
+            "kappa_cloud_eddysed",
+            "g_cloud_eddysed",
+            "w_cloud_eddysed",
+        ]
     N_cloud_params = len(cloud_params)
     params += cloud_params
 

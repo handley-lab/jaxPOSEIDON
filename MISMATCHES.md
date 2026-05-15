@@ -23,6 +23,24 @@ Phase 0.5.15b bit-equivalence test continues to hold. For
 run per-`(j, k)` on 1x1 sub-input slices, since the upstream function
 cannot complete the multi-dim loop.
 
+### Phase 0.5.14 eddysed: scope and review notes
+
+Phase 0.5.14 (eddysed cloud-model dispatch port) was reviewed
+adversarially against POSEIDON `core.py:1685-1700` and
+`parameters.py:978-985, 2440-2473`. The first round flagged an
+unconditional `kappa_cloud` overwrite (since gated to the
+opacity-sampling extinction branch matching POSEIDON's placement)
+and a missing `assign_free_params` ordering parity test (since
+added, parametrized over `cloud_dim in {1, 2}`). A follow-up round
+flagged four pre-existing-in-`main` items that affect all cloud
+models (module-level dispatch sets in `_compute_spectrum.py`, a
+body-comment file:line reference, ignored
+`cloud_properties_contributions` when `kappa_contributions` is
+supplied, and an absent `disable_atmosphere` short-circuit in
+`assign_free_params`). These are tracked as follow-ups outside
+Phase 0.5.14's eddysed scope. The final eddysed-scoped review
+returned APPROVED.
+
 ### Phase 0.5.12 Mie single-string `aerosol_species`
 
 Same root cause as the FastChem single-string divergence below.

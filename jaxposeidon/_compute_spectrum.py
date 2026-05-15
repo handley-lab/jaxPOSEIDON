@@ -13,7 +13,7 @@ Supported envelope:
   and surface=True are the Phase 0.5.13d/e follow-ups.
 - opacity_treatment in {'opacity_sampling', 'line_by_line'}.
 - device='cpu' only.
-- cloud_model in {'cloud-free', 'MacMad17'} only.
+- cloud_model in {'cloud-free', 'MacMad17', 'Mie', 'eddysed'} only.
 - N_sectors/N_zones from TRIDENT geometry (1D or cloud_dim=2 patchy).
 
 Matches POSEIDON's NaN-spectrum rejection sentinel
@@ -46,7 +46,7 @@ def check_atmosphere_physical(atmosphere, opac):
     return True
 
 
-_V0_CLOUD_MODELS = {"cloud-free", "MacMad17", "Mie"}
+_V0_CLOUD_MODELS = {"cloud-free", "MacMad17", "Mie", "eddysed"}
 _V0_CLOUD_TYPES = {"deck", "haze", "deck_haze"}
 _V0_CLOUD_DIMS = {1, 2}
 _V05_MIE_CLOUD_TYPES = {
@@ -347,6 +347,9 @@ def compute_spectrum(
             n_aerosol_array=n_aerosol,
             sigma_Mie_array=sigma_ext_cloud,
         )
+
+        if cloud_model == "eddysed":
+            kappa_cloud = np.array(atmosphere["kappa_cloud_eddysed"])
 
     if is_emission:
         if "dayside" in spectrum_type:
