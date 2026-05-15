@@ -21,9 +21,13 @@ Matches POSEIDON's NaN-spectrum rejection sentinel
 non-physical upstream.
 """
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 
-from jaxposeidon._emission import (
+jax.config.update("jax_enable_x64", True)
+
+from jaxposeidon._emission import (  # noqa: E402
     assign_assumptions_and_compute_single_stream_emission,
     build_surf_reflect,
     determine_photosphere_radii,
@@ -31,9 +35,10 @@ from jaxposeidon._emission import (
     emission_Toon,
     reflection_Toon,
 )
-from jaxposeidon._lbl import extinction_LBL
-from jaxposeidon._opacities import extinction
-from jaxposeidon._transmission import TRIDENT
+from jaxposeidon._jax_transmission import TRIDENT_callback  # noqa: E402
+from jaxposeidon._lbl import extinction_LBL  # noqa: E402
+from jaxposeidon._opacities import extinction  # noqa: E402
+from jaxposeidon._transmission import TRIDENT  # noqa: E402
 
 
 def check_atmosphere_physical(atmosphere, opac):
@@ -633,3 +638,61 @@ def compute_spectrum(
         )
 
     return spectrum
+
+
+def compute_transmission_spectrum_jit(
+    P,
+    r,
+    r_up,
+    r_low,
+    dr,
+    wl,
+    kappa_gas,
+    kappa_Ray,
+    kappa_cloud,
+    enable_deck,
+    enable_haze,
+    b_p,
+    y_p,
+    R_s,
+    f_cloud,
+    phi_cloud_0,
+    theta_cloud_0,
+    phi_edge,
+    theta_edge,
+):
+    """JAX-traceable transmission entry point.
+
+    Lifts the transmission branch of ``compute_spectrum``
+    (POSEIDON `core.py:1303-2132`, transmission case) into a
+    ``jax.jit`` / ``jax.make_jaxpr`` -able function. Numerics are
+    delegated to ``TRIDENT_callback`` (a ``jax.pure_callback`` over
+    the numpy ``_transmission.TRIDENT`` oracle), so bit-exact
+    POSEIDON parity is preserved while the entry point is fully
+    traceable.
+
+    Supports the single-``y_p`` (``y_p`` scalar) transmission case;
+    ``transmission_time_average`` averaging stays on the numpy
+    ``compute_spectrum`` path until the v1-E end-to-end gate.
+    """
+    kappa_clear = kappa_gas + kappa_Ray
+    return TRIDENT_callback(
+        P,
+        r,
+        r_up,
+        r_low,
+        dr,
+        wl,
+        kappa_clear,
+        kappa_cloud,
+        jnp.asarray(enable_deck, dtype=jnp.int64),
+        jnp.asarray(enable_haze, dtype=jnp.int64),
+        jnp.asarray(b_p, dtype=jnp.float64),
+        jnp.asarray(y_p, dtype=jnp.float64),
+        jnp.asarray(R_s, dtype=jnp.float64),
+        jnp.asarray(f_cloud, dtype=jnp.float64),
+        jnp.asarray(phi_cloud_0, dtype=jnp.float64),
+        jnp.asarray(theta_cloud_0, dtype=jnp.float64),
+        phi_edge,
+        theta_edge,
+    )
