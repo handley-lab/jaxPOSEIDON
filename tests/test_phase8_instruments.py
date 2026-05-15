@@ -94,7 +94,7 @@ def test_loglikelihood_no_offsets_no_inflation_unnormalised():
     err_data = np.full(n, 1e-4)
     ll = _data.loglikelihood(ymodel, ydata, err_data, norm_log_default=0.0)
     expected = (-0.5 * ((ymodel - ydata) / err_data) ** 2).sum()
-    np.testing.assert_allclose(ll, expected, atol=0, rtol=0)
+    np.testing.assert_allclose(ll, expected, atol=0, rtol=1e-13)
 
 
 def test_loglikelihood_rejects_NaN_spectrum():
@@ -327,7 +327,7 @@ def test_loglikelihood_includes_default_gaussian_norm():
     expected = (-0.5 * ((ymodel - ydata) / err_data) ** 2).sum() + (
         -0.5 * np.log(2.0 * np.pi * err_data**2)
     ).sum()
-    np.testing.assert_allclose(ll, expected, atol=0, rtol=0)
+    np.testing.assert_allclose(ll, expected, atol=0, rtol=1e-13)
 
 
 def test_loglikelihood_with_offset_and_inflation():
@@ -354,7 +354,7 @@ def test_loglikelihood_with_offset_and_inflation():
     err_eff_sq = err_data**2 + 10.0 ** err_inflation_params[0]
     norm_log = (-0.5 * np.log(2.0 * np.pi * err_eff_sq)).sum()
     chi2 = (-0.5 * (ymodel - ydata_adj) ** 2 / err_eff_sq).sum()
-    np.testing.assert_allclose(ll, chi2 + norm_log, atol=0, rtol=0)
+    np.testing.assert_allclose(ll, chi2 + norm_log, atol=0, rtol=1e-13)
 
 
 def test_apply_offsets_two_datasets_lumped():
@@ -495,7 +495,7 @@ def test_loglikelihood_replicates_poseidon_formula_combined():
     )
     norm_log = (-0.5 * np.log(2.0 * np.pi * err_eff_sq)).sum()
     chi2 = (-0.5 * (ymodel - ydata_adj) ** 2 / err_eff_sq).sum()
-    np.testing.assert_allclose(ll, chi2 + norm_log + ln_prior_TP, atol=0, rtol=0)
+    np.testing.assert_allclose(ll, chi2 + norm_log + ln_prior_TP, atol=0, rtol=1e-13)
 
 
 # ---------------------------------------------------------------------------

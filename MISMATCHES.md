@@ -5,6 +5,24 @@ POSEIDON reference outputs.
 
 ## Open numerical mismatches
 
+### v1-A `_jax_interpolate.regular_grid_interp_linear` boundary handling
+
+The v1-A plan specifies "linear extrapolation off (boundary clip)" for
+the JAX RegularGridInterpolator wrapper (plan line: "wrapper around
+`jax.scipy.interpolate.RegularGridInterpolator(method='linear')` with
+linear extrapolation off (boundary clip)"). scipy's
+`RegularGridInterpolator(method='linear', bounds_error=False,
+fill_value=None)` extrapolates linearly outside the grid.
+
+This is intentional: the v0.5 callers (`_chemistry.py:121`,
+`_clouds.py:162`) construct query points that are clipped upstream to
+the grid range, so the extrapolation branch is never exercised. The
+JAX wrapper returns the boundary value for out-of-range queries
+rather than extrapolating, which is safer under JIT (no spurious
+divergence if the upstream clip is removed). Parity tests use only
+in-range query points; an explicit clip-vs-extrapolation test
+documents the divergence (`test_regular_grid_interp_linear_clips_out_of_range`).
+
 ### Phase 0.5.15c LBL handle re-open for multi-(sector, zone)
 
 POSEIDON `absorption.py:1739-1951` opens the molecular and CIA HDF5

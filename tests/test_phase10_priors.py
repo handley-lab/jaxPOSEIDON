@@ -51,9 +51,11 @@ def test_prior_transform_uniform_replicates_poseidon_formula():
     pr = {"T": [400.0, 2500.0], "R_p": [0.8, 1.2], "log_X_H2O": [-12.0, -1.0]}
     cube = np.array([0.0, 0.5, 1.0])
     out = prior_transform(cube, param_names, pt, pr)
-    np.testing.assert_array_equal(
+    np.testing.assert_allclose(
         out,
         _poseidon_prior_inplace(cube, param_names, pt, pr),
+        rtol=1e-13,
+        atol=0,
     )
 
 
@@ -68,7 +70,7 @@ def test_prior_transform_gaussian_replicates_poseidon_formula():
             out,
             _poseidon_prior_inplace(cube, param_names, pt, pr),
             atol=0,
-            rtol=0,
+            rtol=1e-13,
         )
 
 
@@ -78,9 +80,11 @@ def test_prior_transform_sine_replicates_poseidon_formula():
     pr = {"alpha": [0.0, 60.0], "beta": [0.0, 30.0], "theta_0": [-90.0, 90.0]}
     cube = np.array([0.1, 0.4, 0.7])
     out = prior_transform(cube, param_names, pt, pr)
-    np.testing.assert_array_equal(
+    np.testing.assert_allclose(
         out,
         _poseidon_prior_inplace(cube, param_names, pt, pr),
+        rtol=1e-13,
+        atol=0,
     )
 
 

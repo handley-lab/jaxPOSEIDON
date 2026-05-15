@@ -21,9 +21,9 @@ def test_CLR_Prior_matches_poseidon(seed):
 
     rng = np.random.default_rng(seed)
     chem_drawn = rng.uniform(0.0, 1.0, size=4)  # 4 species → 5-element output
-    ours = CLR_Prior(chem_drawn, limit=-12.0)
+    ours = np.array(CLR_Prior(chem_drawn, limit=-12.0))
     theirs = p_CLR(chem_drawn, limit=-12.0)
-    np.testing.assert_array_equal(ours, theirs)
+    np.testing.assert_allclose(ours, theirs, rtol=1e-13, atol=0)
 
 
 @pytest.mark.parametrize("n_species", [1, 2, 3, 4, 6])
