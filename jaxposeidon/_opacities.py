@@ -73,8 +73,6 @@ def extinction(
     ``_h_minus.H_minus_free_free`` and ``_h_minus.H_minus_bound_free``
     once the read_opacities port lifts the POSEIDON delegation).
     """
-    if enable_surface == 1:
-        raise NotImplementedError("surfaces deferred to v1")
     if enable_Mie == 1:
         raise NotImplementedError("Mie clouds deferred to v1")
 
@@ -147,5 +145,8 @@ def extinction(
 
             if enable_deck == 1:
                 kappa_cloud[P_cloud[0] < P, j, k, :] += kappa_cloud_0
+
+            if enable_surface == 1:
+                kappa_gas[(P_surf < P), j, k, :] = 1.0e250
 
     return kappa_gas, kappa_Ray, kappa_cloud, kappa_cloud_separate

@@ -135,13 +135,6 @@ def test_extinction_matches_poseidon(enable_haze, enable_deck):
         np.testing.assert_allclose(a, b, atol=1e-22, rtol=1e-13)
 
 
-def test_extinction_rejects_surface():
-    cfg = _set_up_extinction()
-    cfg["enable_surface"] = 1
-    with pytest.raises(NotImplementedError, match="surface"):
-        extinction(**cfg)
-
-
 def test_extinction_rejects_Mie():
     cfg = _set_up_extinction()
     cfg["enable_Mie"] = 1
