@@ -83,11 +83,17 @@ def compute_spectrum(
             "return_albedo=True applies to emission/reflection spectrum_types; "
             "the spectrum_type dispatch wiring is the Phase 0.5.13c follow-up."
         )
-    if len(kappa_contributions) or len(cloud_properties_contributions):
-        raise NotImplementedError(
-            "kappa_contributions / cloud_properties_contributions are the "
-            "Phase 0.5.17b follow-up."
-        )
+    if len(kappa_contributions):
+        if len(kappa_contributions) != 4:
+            raise ValueError(
+                "kappa_contributions must be a 4-tuple "
+                "(kappa_gas, kappa_Ray, kappa_cloud, kappa_cloud_separate)."
+            )
+        if len(cloud_properties_contributions) not in (0, 2):
+            raise ValueError(
+                "cloud_properties_contributions must be a 2-tuple "
+                "(w_cloud, g_cloud) when provided."
+            )
 
     disable_atmosphere = model["disable_atmosphere"]
     if disable_atmosphere:
@@ -208,42 +214,50 @@ def compute_spectrum(
     log_P_fine = opac["log_P_fine"]
 
     # ----- Phase 4: runtime extinction ---------------------------------------
-    kappa_gas, kappa_Ray, kappa_cloud, _kappa_sep = extinction(
-        chemical_species,
-        active_species,
-        CIA_pairs,
-        ff_pairs,
-        bf_species,
-        n,
-        T,
-        P,
-        wl,
-        X,
-        X_active,
-        X_CIA,
-        X_ff,
-        X_bf,
-        a,
-        gamma,
-        P_cloud,
-        kappa_cloud_0,
-        sigma_stored,
-        CIA_stored,
-        Rayleigh_stored,
-        ff_stored,
-        bf_stored,
-        enable_haze,
-        enable_deck,
-        enable_surface=0,
-        N_sectors=N_sectors,
-        N_zones=N_zones,
-        T_fine=T_fine,
-        log_P_fine=log_P_fine,
-        P_surf=P_surf,
-        enable_Mie=0,
-        n_aerosol_array=n_aerosol,
-        sigma_Mie_array=sigma_ext_cloud,
-    )
+    if len(kappa_contributions):
+        kappa_gas, kappa_Ray, kappa_cloud, _kappa_sep = (
+            kappa_contributions[0],
+            kappa_contributions[1],
+            kappa_contributions[2],
+            kappa_contributions[3],
+        )
+    else:
+        kappa_gas, kappa_Ray, kappa_cloud, _kappa_sep = extinction(
+            chemical_species,
+            active_species,
+            CIA_pairs,
+            ff_pairs,
+            bf_species,
+            n,
+            T,
+            P,
+            wl,
+            X,
+            X_active,
+            X_CIA,
+            X_ff,
+            X_bf,
+            a,
+            gamma,
+            P_cloud,
+            kappa_cloud_0,
+            sigma_stored,
+            CIA_stored,
+            Rayleigh_stored,
+            ff_stored,
+            bf_stored,
+            enable_haze,
+            enable_deck,
+            enable_surface=0,
+            N_sectors=N_sectors,
+            N_zones=N_zones,
+            T_fine=T_fine,
+            log_P_fine=log_P_fine,
+            P_surf=P_surf,
+            enable_Mie=0,
+            n_aerosol_array=n_aerosol,
+            sigma_Mie_array=sigma_ext_cloud,
+        )
 
     if is_emission:
         if "dayside" in spectrum_type:
