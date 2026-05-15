@@ -2,9 +2,9 @@
 
 Mirrors ``POSEIDON.contributions.extinction_spectral_contribution`` and
 ``POSEIDON.contributions.extinction_pressure_contribution`` over the v0
-envelope (no surface, no Mie, no H-minus ff/bf), exercising every
-selector path: per-species, bulk-only, cloud_contribution, and
-total_pressure_contribution.
+envelope (no surface, no Mie), exercising every selector path:
+per-species, bulk-only, cloud_contribution, total_pressure_contribution,
+H-minus ff/bf, and multi-sector / multi-zone parity.
 """
 
 import numpy as np
@@ -348,8 +348,19 @@ def test_compute_spectrum_accepts_kappa_contributions(monkeypatch):
 
 
 def _setup_hminus(N_layers=14, N_wl=10, N_T_fine=5, N_P_fine=6, seed=1):
+    """H-minus fixture: H- is in bf_species ONLY, not in chemical_species.
+
+    This is POSEIDON's convention (H- is a photo-dissociation source,
+    not a mixing-ratio species in `chemical_species`). It exercises the
+    documented `MISMATCHES.md` numba-default-zero behaviour: when the
+    contribution lookup loops at `contributions.py:215-222` /
+    `:1207-1214` never find `contribution_species='H-'` in
+    `chemical_species` or `active_species`, the kernel falls through
+    on `contribution_molecule_*_index = 0` — matched here by the
+    port's explicit `= 0` initialisation.
+    """
     rng = np.random.default_rng(seed)
-    chemical_species = np.array(["H2", "He", "H2O", "H-", "H", "e-"])
+    chemical_species = np.array(["H2", "He", "H2O"])
     active_species = np.array(["H2O"])
     cia_pairs = np.array(["H2-H2", "H2-He"])
     ff_pairs = np.array(["H-ff"])
@@ -361,13 +372,10 @@ def _setup_hminus(N_layers=14, N_wl=10, N_T_fine=5, N_P_fine=6, seed=1):
     n = rng.uniform(1e15, 1e25, size=(N_layers, 1, 1))
     wl = np.linspace(1.0, 5.0, N_wl)
 
-    X = np.zeros((6, N_layers, 1, 1))
+    X = np.zeros((3, N_layers, 1, 1))
     X[0] = 0.84
     X[1] = 0.149
     X[2] = 0.005
-    X[3] = 1.0e-8
-    X[4] = 1.0e-6
-    X[5] = 1.0e-10
 
     X_active = X[2:3]
 
@@ -377,19 +385,22 @@ def _setup_hminus(N_layers=14, N_wl=10, N_T_fine=5, N_P_fine=6, seed=1):
     X_cia[0, 1] = X[0]
     X_cia[1, 1] = X[1]
 
+    n_H = rng.uniform(1e-7, 1e-5, size=(N_layers, 1, 1))
+    n_e = rng.uniform(1e-12, 1e-10, size=(N_layers, 1, 1))
+    n_Hm = rng.uniform(1e-10, 1e-8, size=(N_layers, 1, 1))
     X_ff = np.zeros((2, 1, N_layers, 1, 1))
-    X_ff[0, 0] = X[4]
-    X_ff[1, 0] = X[5]
+    X_ff[0, 0] = n_H
+    X_ff[1, 0] = n_e
 
     X_bf = np.zeros((1, N_layers, 1, 1))
-    X_bf[0] = X[3]
+    X_bf[0] = n_Hm
 
     T_fine = np.linspace(500.0, 2500.0, N_T_fine)
     log_P_fine = np.linspace(-6.0, 2.0, N_P_fine)
 
     sigma_stored = rng.uniform(0.0, 1e-22, size=(1, N_P_fine, N_T_fine, N_wl))
     cia_stored = rng.uniform(0.0, 1e-44, size=(2, N_T_fine, N_wl))
-    Rayleigh_stored = rng.uniform(0.0, 1e-27, size=(6, N_wl))
+    Rayleigh_stored = rng.uniform(0.0, 1e-27, size=(3, N_wl))
     ff_stored = rng.uniform(0.0, 1e-44, size=(1, N_T_fine, N_wl))
     bf_stored = rng.uniform(0.0, 1e-20, size=(1, N_wl))
 
