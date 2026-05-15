@@ -10,14 +10,15 @@ Faithful numpy port of POSEIDON `contributions.py`:
   used by ``pressure_contribution_compute_spectrum`` to suppress one
   layer's contribution).
 
-v0 envelope (matching ``_opacities.extinction``):
-- ``enable_surface = 0`` and ``enable_Mie = 0`` only; the surface/Mie
-  branches raise ``NotImplementedError`` to keep parity with the rest
-  of the v0 hot-path. ``cloud_species`` /
-  ``cloud_total_contribution`` likewise only enter the Mie branch,
-  which is gated.
-- All CIA / free-free / bound-free / active / Rayleigh / haze / deck
-  branches are ported verbatim.
+All CIA / free-free / bound-free / active / Rayleigh / haze / deck /
+surface / Mie branches are ported verbatim from POSEIDON. The
+surface branch sets ``kappa_gas`` to ``1e250`` below ``P_surf``;
+the Mie branch handles both the opaque-deck-first-element layout
+(``len(n_aerosol_array) == len(sigma_Mie_array) + 1``) and the
+no-opaque-deck layout (lengths equal), and supports
+``cloud_contribution`` / ``cloud_total_contribution`` selectors
+with the ``aerosol_species_index`` lookup against
+``aerosol_species``.
 
 The orchestrators (``spectral_contribution`` /
 ``pressure_contribution`` / ``pressure_contribution_compute_spectrum``)
@@ -109,15 +110,9 @@ def extinction_spectral_contribution(
     """Per-species kappa generator for spectral contribution plots.
 
     Mirrors POSEIDON ``contributions.py:143-505``
-    (``extinction_spectral_contribution``). Surface (``enable_surface=1``)
-    and Mie (``enable_Mie=1``) branches are deferred to v1 to match
-    ``_opacities.extinction``'s v0 envelope.
+    (``extinction_spectral_contribution``) including surface and Mie
+    branches.
     """
-    if enable_surface == 1:
-        raise NotImplementedError("surfaces deferred to v1")
-    if enable_Mie == 1:
-        raise NotImplementedError("Mie clouds deferred to v1")
-
     N_species = len(chemical_species)
     N_species_active = len(active_species)
     N_cia_pairs = len(cia_pairs)
@@ -245,6 +240,78 @@ def extinction_spectral_contribution(
                     kappa_cloud_0_eff = kappa_cloud_0
                 kappa_cloud[(P > P_cloud[0]), j, k, :] += kappa_cloud_0_eff
 
+            if enable_surface == 1:
+                kappa_gas[(P > P_surf), j, k, :] = 1.0e250
+
+            if enable_Mie == 1:
+                aerosol_species_index = 0
+                if cloud_contribution and not cloud_total_contribution:
+                    for q in range(len(aerosol_species)):
+                        if cloud_species == aerosol_species[q]:
+                            aerosol_species_index = q
+
+                if len(n_aerosol_array) == len(sigma_Mie_array):
+                    for aerosol in range(len(n_aerosol_array)):
+                        for i in range(i_bot, N_layers):
+                            for l in range(len(wl)):
+                                if not cloud_contribution:
+                                    kappa_cloud[i, j, k, l] += (
+                                        n_aerosol_array[aerosol][i, j, k] * 0.0
+                                    )
+                                elif (
+                                    cloud_contribution and not cloud_total_contribution
+                                ):
+                                    if aerosol == aerosol_species_index:
+                                        kappa_cloud[i, j, k, l] += (
+                                            n_aerosol_array[aerosol][i, j, k]
+                                            * sigma_Mie_array[aerosol][l]
+                                        )
+                                    else:
+                                        kappa_cloud[i, j, k, l] += (
+                                            n_aerosol_array[aerosol][i, j, k] * 0.0
+                                        )
+                                elif cloud_total_contribution:
+                                    kappa_cloud[i, j, k, l] += (
+                                        n_aerosol_array[aerosol][i, j, k]
+                                        * sigma_Mie_array[aerosol][l]
+                                    )
+                else:
+                    for aerosol in range(len(n_aerosol_array)):
+                        if not cloud_contribution:
+                            if aerosol == 0:
+                                kappa_cloud[(P > P_cloud[0]), j, k, :] += 0.0
+                            else:
+                                for i in range(i_bot, N_layers):
+                                    for l in range(len(wl)):
+                                        kappa_cloud[i, j, k, l] += (
+                                            n_aerosol_array[aerosol][i, j, k] * 0.0
+                                        )
+                        elif cloud_contribution and not cloud_total_contribution:
+                            if aerosol == 0:
+                                kappa_cloud[(P > P_cloud[0]), j, k, :] += 0.0
+                            else:
+                                for i in range(i_bot, N_layers):
+                                    for l in range(len(wl)):
+                                        if aerosol - 1 == aerosol_species_index:
+                                            kappa_cloud[i, j, k, l] += (
+                                                n_aerosol_array[aerosol][i, j, k]
+                                                * sigma_Mie_array[aerosol - 1][l]
+                                            )
+                                        else:
+                                            kappa_cloud[i, j, k, l] += (
+                                                n_aerosol_array[aerosol][i, j, k] * 0.0
+                                            )
+                        elif cloud_total_contribution:
+                            if aerosol == 0:
+                                kappa_cloud[(P > P_cloud[0]), j, k, :] += 1.0e250
+                            else:
+                                for i in range(i_bot, N_layers):
+                                    for l in range(len(wl)):
+                                        kappa_cloud[i, j, k, l] += (
+                                            n_aerosol_array[aerosol][i, j, k]
+                                            * sigma_Mie_array[aerosol - 1][l]
+                                        )
+
     return kappa_gas, kappa_Ray, kappa_cloud
 
 
@@ -296,15 +363,9 @@ def extinction_pressure_contribution(
     """Per-layer kappa generator for pressure contribution plots.
 
     Mirrors POSEIDON ``contributions.py:1135-1550``
-    (``extinction_pressure_contribution``). Surface (``enable_surface=1``)
-    and Mie (``enable_Mie=1``) branches are deferred to v1 to match
-    ``_opacities.extinction``'s v0 envelope.
+    (``extinction_pressure_contribution``) including surface and Mie
+    branches.
     """
-    if enable_surface == 1:
-        raise NotImplementedError("surfaces deferred to v1")
-    if enable_Mie == 1:
-        raise NotImplementedError("Mie clouds deferred to v1")
-
     N_species = len(chemical_species)
     N_species_active = len(active_species)
     N_cia_pairs = len(cia_pairs)
@@ -458,5 +519,116 @@ def extinction_pressure_contribution(
                         kappa_cloud[i, j, k, :] = 0.0
                     if total_pressure_contribution and (i == layer_to_ignore):
                         kappa_cloud[i, j, k, :] = 0.0
+
+            if enable_surface == 1:
+                kappa_gas[(P > P_surf), j, k, :] = 1.0e250
+
+            if enable_Mie == 1:
+                aerosol_species_index = 0
+                if cloud_contribution and not cloud_total_contribution:
+                    for q in range(len(aerosol_species)):
+                        if cloud_species == aerosol_species[q]:
+                            aerosol_species_index = q
+
+                if len(n_aerosol_array) == len(sigma_Mie_array):
+                    for aerosol in range(len(n_aerosol_array)):
+                        for i in range(i_bot, N_layers):
+                            for l in range(len(wl)):
+                                if (
+                                    cloud_contribution
+                                    and not cloud_total_contribution
+                                    and (i == layer_to_ignore)
+                                ):
+                                    if aerosol != aerosol_species_index:
+                                        kappa_cloud[i, j, k, l] += (
+                                            n_aerosol_array[aerosol][i, j, k]
+                                            * sigma_Mie_array[aerosol][l]
+                                        )
+                                    else:
+                                        kappa_cloud[i, j, k, l] += (
+                                            n_aerosol_array[aerosol][i, j, k] * 0.0
+                                        )
+                                elif cloud_total_contribution and (
+                                    i == layer_to_ignore
+                                ):
+                                    kappa_cloud[i, j, k, l] += (
+                                        n_aerosol_array[aerosol][i, j, k] * 0.0
+                                    )
+                                elif total_pressure_contribution and (
+                                    i == layer_to_ignore
+                                ):
+                                    kappa_cloud[i, j, k, l] += (
+                                        n_aerosol_array[aerosol][i, j, k] * 0.0
+                                    )
+                                else:
+                                    kappa_cloud[i, j, k, l] += (
+                                        n_aerosol_array[aerosol][i, j, k]
+                                        * sigma_Mie_array[aerosol][l]
+                                    )
+                else:
+                    for aerosol in range(len(n_aerosol_array)):
+                        if cloud_contribution and cloud_total_contribution:
+                            if aerosol == 0:
+                                kappa_cloud[(P > P_cloud[0]), j, k, :] += kappa_cloud_0
+                                for i in range(i_bot, N_layers):
+                                    if i == layer_to_ignore:
+                                        kappa_cloud[i, j, k, :] = 0.0
+                            else:
+                                for i in range(i_bot, N_layers):
+                                    for l in range(len(wl)):
+                                        if i == layer_to_ignore:
+                                            kappa_cloud[i, j, k, l] += (
+                                                n_aerosol_array[aerosol][i, j, k] * 0.0
+                                            )
+                                        else:
+                                            kappa_cloud[i, j, k, l] += (
+                                                n_aerosol_array[aerosol][i, j, k]
+                                                * sigma_Mie_array[aerosol - 1][l]
+                                            )
+                        elif cloud_contribution and not cloud_total_contribution:
+                            if aerosol == 0:
+                                kappa_cloud[(P > P_cloud[0]), j, k, :] += kappa_cloud_0
+                            else:
+                                for i in range(i_bot, N_layers):
+                                    for l in range(len(wl)):
+                                        if (aerosol - 1 == aerosol_species_index) and (
+                                            i == layer_to_ignore
+                                        ):
+                                            kappa_cloud[i, j, k, l] += (
+                                                n_aerosol_array[aerosol][i, j, k] * 0.0
+                                            )
+                                        else:
+                                            kappa_cloud[i, j, k, l] += (
+                                                n_aerosol_array[aerosol][i, j, k]
+                                                * sigma_Mie_array[aerosol - 1][l]
+                                            )
+                        elif total_pressure_contribution:
+                            if aerosol == 0:
+                                kappa_cloud[(P > P_cloud[0]), j, k, :] += kappa_cloud_0
+                                for i in range(i_bot, N_layers):
+                                    if i == layer_to_ignore:
+                                        kappa_cloud[i, j, k, :] -= kappa_cloud_0
+                            else:
+                                for i in range(i_bot, N_layers):
+                                    for l in range(len(wl)):
+                                        if i == layer_to_ignore:
+                                            kappa_cloud[i, j, k, l] += (
+                                                n_aerosol_array[aerosol][i, j, k] * 0.0
+                                            )
+                                        else:
+                                            kappa_cloud[i, j, k, l] += (
+                                                n_aerosol_array[aerosol][i, j, k]
+                                                * sigma_Mie_array[aerosol - 1][l]
+                                            )
+                        else:
+                            if aerosol == 0:
+                                kappa_cloud[(P > P_cloud[0]), j, k, :] += 1.0e250
+                            else:
+                                for i in range(i_bot, N_layers):
+                                    for l in range(len(wl)):
+                                        kappa_cloud[i, j, k, l] += (
+                                            n_aerosol_array[aerosol][i, j, k]
+                                            * sigma_Mie_array[aerosol - 1][l]
+                                        )
 
     return kappa_gas, kappa_Ray, kappa_cloud
