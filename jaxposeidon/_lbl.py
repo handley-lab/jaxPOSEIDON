@@ -352,11 +352,12 @@ def extinction_LBL(
     free-free / bound-free fits, then accumulates kappa via
     `compute_kappa_LBL`.
 
-    Note: POSEIDON closes the CIA and opacity HDF5 files inside the
-    `(N_sectors, N_zones)` loop body (a known upstream quirk); this port
-    preserves the same behaviour for bit-equivalence. As a result the
-    LBL path supports only `N_sectors == N_zones == 1` until upstream
-    moves the closes outside the loop.
+    POSEIDON closes the CIA and opacity HDF5 files inside the
+    `(N_sectors, N_zones)` loop body. Subsequent `(j, k)` iterations
+    then read from already-closed handles, which is an upstream defect.
+    This port re-opens the handles at the top of each `(j, k)` iteration
+    so the loop is well-defined for `N_sectors > 1` or `N_zones > 1`;
+    on the trivial `1 x 1` case the behaviour is identical to upstream.
     """
     if not suppress_print:
         print("Reading in cross sections in line-by-line mode...")
@@ -378,10 +379,9 @@ def extinction_LBL(
     kappa_Ray = np.zeros(shape=(N_layers, N_sectors, N_zones, N_wl))
     kappa_cloud = np.zeros(shape=(N_layers, N_sectors, N_zones, N_wl))
 
-    opac_file, cia_file = open_opacity_files(opacity_database, database_version)
-
     for j in range(N_sectors):
         for k in range(N_zones):
+            opac_file, cia_file = open_opacity_files(opacity_database, database_version)
             cia_interp = np.zeros(shape=(N_cia_pairs, N_layers, N_wl))
 
             for q in range(N_cia_pairs):
