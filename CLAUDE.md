@@ -58,25 +58,55 @@ This is scientific code, not a web service.
 - `_opacities.py` — runtime extinction (nearest-index lookup,
   cloud/surface thresholds).
 - `_atmosphere.py` — T-P profiles, hydrostatic R(P), μ.
-- `_chemistry.py` — free chemistry hot path; FastChem equilibrium-chemistry
-  interpolation runs here in v0.5 (loader stays in
-  `_fastchem_grid_loader.py`).
-- `_clouds.py` — MacMad17 (v0) + Mie / eddysed (v0.5) parameter unpacking.
+- `_chemistry.py` — free chemistry hot path plus FastChem
+  equilibrium-chemistry interpolation
+  (`interpolate_log_X_grid`, ported from POSEIDON
+  `chemistry.py:119-271`). The grid loader stays in
+  `_fastchem_grid_loader.py` (setup-only file I/O).
+- `_clouds.py` — MacMad17 parameter unpacking + Mie
+  `interpolate_sigma_Mie_grid`. Iceberg is **dropped by design**
+  (POSEIDON open-source does not implement it at the cloned commit);
+  eddysed runtime forward-model integration is the 0.5.14 follow-up.
 - `_instruments.py` — JAX-pure convolution / binning hot path
   (setup-only `compute_instrument_indices` + photometric dispatch
   table lives in `_instrument_setup.py`).
 - `_geometry.py` — angular grids, zone boundaries; 2D/3D in v0.5.
 - `_transmission.py` — TRIDENT chord RT (transmission only).
-- `_emission.py`, `_reflection.py` — Toon two-stream solvers (v0.5+).
-- `_surfaces.py` — JAX-pure surface-albedo interpolation hot path
-  (v0.5+). File I/O + lab-data dispatch live in
-  `_surface_setup.py`. Spectral effect applied in
-  `_compute_spectrum.py` emission flow.
-- `_stellar.py` — stellar contamination application (v0.5+;
-  pysynphot/PyMSG loaders in `_stellar_grid_loader.py`).
-- `_lbl.py` — line-by-line opacity mode (v0.5+; HDF5 loader in
+- `_emission.py` — thermal emission + reflection: Planck radiance,
+  single-stream emission (with and without surface emissivity),
+  photosphere-radius interpolation, and Toon two-stream
+  source-function / reflected-light solvers (ports POSEIDON
+  `emission.py:30-1609`). No separate `_reflection.py`; reflected-light
+  lives here for parity with POSEIDON's layout.
+- Surfaces — there is no `_surfaces.py` module. Surface-albedo
+  setup, lab-data dispatch and file I/O live in `_surface_setup.py`;
+  the spectral effect (renormalisation, multi-component albedo
+  blending, bare-surface emission coupling) is applied directly in
+  `_compute_spectrum.py` along the emission flow.
+- `_stellar.py` — stellar contamination forward model
+  (`planck_lambda`, Rackham+17/18 single-spot,
+  multi-region general). The pysynphot / PyMSG grid loader lives in
+  `_stellar_grid_loader.py` (setup-only).
+- `_lbl.py` — line-by-line opacity mode: `extinction_LBL`
+  orchestrator + supporting kernels (the HDF5 loader stays in
   `_lbl_table_loader.py`).
-- `_high_res.py` — high-resolution observable pipeline (v0.5+).
+- `_high_res.py` — high-resolution-spectroscopy hot path: airtovac /
+  vactoair, sysrem, fast_filter, fit_out_transit_spec, RV-range,
+  cross_correlate, rotation kernel, remove_outliers (ports POSEIDON
+  `high_res.py:14-29, 179-256, 257-285, 319-336, 339-404, 440-450,
+  834-859, 862-882`). The retrieval-closure likelihoods
+  (`prepare_high_res_data`, `loglikelihood_PCA`, `loglikelihood_sysrem`,
+  `loglikelihood_high_res`) are the 0.5.16b2 follow-up.
+- `_contributions.py` — per-species spectral and per-layer pressure
+  contribution kernels (`extinction_spectral_contribution`,
+  `extinction_pressure_contribution`); POSEIDON-mirror branch
+  structure preserved for review parity (allow-listed for `SIM109`,
+  `SIM114`, `SIM300` in `pyproject.toml`).
+- `_h_minus.py` — H- bound-free and free-free opacities.
+- `_setup_api.py` — POSEIDON-setup-API mirror so callers can run
+  end-to-end without `import POSEIDON` at runtime (`create_star`,
+  `create_planet`, `define_model`, `read_opacities`,
+  `make_atmosphere`, `wl_grid_constant_R`).
 - `_parameters.py` — hot-path split/unpack of already-constructed
   parameter vectors (JAX-pure in v1). String-heavy
   `assign_free_params`, kwarg dispatch, POSEIDON-mirror dispatch

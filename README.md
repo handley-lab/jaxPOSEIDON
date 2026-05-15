@@ -52,7 +52,7 @@ export POSEIDON_input_data=/path/to/POSEIDON_input_data
 
 ## Numerical validation
 
-POSEIDON is the numerical oracle. 1,435 tests assert equivalence
+POSEIDON is the numerical oracle. 1,744 tests assert equivalence
 against POSEIDON across the supported configuration surface, including
 a 396-case forward-model parametric sweep over atmosphere and cloud
 parameters at `atol=1e-15, rtol=1e-13` — comfortably inside the plan's
@@ -76,23 +76,68 @@ sweep — 395 bit-exact, one case at 1.7×10⁻¹² ppm:
 
 Reproduce with `python scripts/generate_{parity_figures,binning_figure,sweep_histogram}.py`.
 
-## Scope
+## Scope (v0.5)
 
-Supports K2-18b-style transmission retrievals: 1D background atmosphere (`PT_dim=1`, `X_dim=1`), MS09 P-T (and isotherm), isochem free chemistry over POSEIDON's supported line-list species, MacMad17 deck/haze with optional `cloud_dim=2` patchy clouds, one-offset NIRSpec-style instrument binning, Gaussian likelihood with optional offsets and Line15 / Piette20 error inflation.
+v0.5 covers POSEIDON's full forward-model surface at numpy/scipy parity.
+Setup uses POSEIDON's `create_star` / `create_planet` / `define_model` /
+`make_atmosphere` / `read_opacities` (mirrored under `jaxposeidon._setup_api`
+for callers who prefer to avoid `import POSEIDON` at runtime); the hot
+path runs through jaxPOSEIDON.
 
-The following branches are **deferred** and raise descriptive `NotImplementedError` rather than crashing with `TypeError`:
+Supported configurations:
 
-- JAX-traceable forward model and full `jax.grad` parity
-- BlackJAX NSS sampler execution and the K2-18b retrieval run
-- Line-by-line opacity mode
-- Mie / Iceberg / eddysed cloud models
-- Emission / reflection / direct / dayside / nightside spectra
-- Stellar contamination
-- Surfaces
-- Photometric instruments (IRAC etc.)
-- CLR mixing-ratio priors
-- PT_penalty / Pelletier branch
-- 2D / 3D atmospheres and Δ-mixing-ratio prior gating
+- **`spectrum_type`**: `transmission`, `transmission_time_average`,
+  `emission`, `dayside_emission`, `nightside_emission`, `direct_emission`.
+- **`cloud_model`**: `cloud-free`, `MacMad17` (deck / haze / deck_haze,
+  with `cloud_dim ∈ {1, 2}` patchy clouds), `Mie` (aerosol cross-section
+  grid interpolation; see Iceberg note below).
+- **`PT_profile`**: `isotherm`, `Madhu` (MS09), plus the v0.5 multi-knot
+  / Pelletier / `PT_penalty` profiles wired through `_atmosphere.py`.
+- **`X_profile`**: isochem free chemistry over POSEIDON's supported
+  line-list species; FastChem equilibrium-chemistry grid interpolation
+  via `_chemistry.py` + `_fastchem_grid_loader.py`.
+- **Geometry**: 1D background plus 2D / 3D atmospheres
+  (`PT_dim, X_dim ∈ {1, 2, 3}`) with Δ-mixing-ratio prior gating.
+- **Opacities**: opacity-sampling (default) and **line-by-line** mode
+  (`_lbl.py` + `_lbl_table_loader.py`); H- bound-free / free-free in
+  `_h_minus.py`.
+- **Instruments**: spectroscopic NIRSpec-style binning and photometric
+  (IRAC etc.) dispatch via `_instrument_setup.py`.
+- **Emission / reflection**: single-stream thermal emission with
+  surface emissivity, Toon two-stream multiple-scattering emission and
+  reflected-light branches (`_emission.py`).
+- **Surfaces**: bare-surface coupling in emission with constant or
+  lab-data albedos (multi-component) via `_surface_setup.py`.
+- **Stellar contamination**: Rackham+17/18 single-spot and multi-region
+  factors with pysynphot / PyMSG grid loaders (`_stellar.py` +
+  `_stellar_grid_loader.py`).
+- **High-resolution**: airtovac / vactoair, sysrem, data-prep,
+  Doppler / rotation kernel, CCF surface (`_high_res.py`).
+- **Contributions**: per-species spectral and per-layer pressure
+  contribution kernels (`_contributions.py`).
+- **Likelihood / priors**: Gaussian likelihood with optional offsets and
+  Line15 / Piette20 error inflation; uniform / Gaussian / sine / CLR
+  mixing-ratio priors and `PT_penalty` regularisation.
+
+### POSEIDON-oracle absences (NOT jaxPOSEIDON deferrals)
+
+POSEIDON open-source at the cloned commit does **not** ship an `Iceberg`
+cloud model — the kwarg is exposed at POSEIDON's public API but the
+runtime branch is absent. jaxPOSEIDON accordingly rejects
+`opaque_Iceberg=True` with `NotImplementedError`; there is no POSEIDON
+output to match.
+
+### Deferred to v1
+
+- JAX-traceable forward model and full `jax.grad` parity (the v0.5
+  hot path is faithful numpy/scipy; tracing migration is the v1 step
+  that unlocks BlackJAX NSS execution).
+- `loglikelihood_PCA` / `loglikelihood_sysrem` / `loglikelihood_high_res`
+  closures (high-res data-prep + CCF surface are ported; the retrieval
+  closures wrapping them are the 0.5.16b2 follow-up).
+- Live BlackJAX NSS sampler execution and the K2-18b retrieval run.
+- eddysed runtime integration with the forward model (loader is in
+  `_eddysed_input_loader.py`; runtime wiring is the 0.5.14 follow-up).
 
 ## Running the tests
 
