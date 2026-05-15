@@ -52,6 +52,17 @@ paths guard those references explicitly, so the `0` default is only
 read on paths where POSEIDON itself reads it (and there too gets
 `0`).
 
+The spectral kernel guards the active-species and Rayleigh loops with
+`not bound_free` (see `contributions.py:338`, `:366`); the pressure
+kernel does **not** (see `contributions.py:1351`, `:1378`). This
+asymmetry is intentional POSEIDON behaviour, mirrored verbatim.
+
+`bound_free` is `True` iff `contribution_species == "H-"` exactly —
+not on any of the `bf_species` names like `"H-bf"`. This matches
+POSEIDON `contributions.py:232` / `:1224` and is a POSEIDON-inherited
+footgun: callers must pass `"H-"` (the species), not the bf_species
+label.
+
 ## Resolved
 
 - **Phase 4 extinction parametric tolerance**: POSEIDON's numba reduction
