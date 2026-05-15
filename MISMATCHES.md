@@ -28,6 +28,43 @@ emission / reflection parity tests run at `rtol=1e-10, atol=1e-8`
 per the plan's component-specific tolerance for the source-function
 method.
 
+### v1-C TRIDENT JIT boundary uses `jax.pure_callback`
+
+The v1-C plan row calls for refactoring TRIDENT's data-dependent
+control flow into `lax.cond` / `lax.fori_loop` / `vmap` with
+fixed-buffer maxima for the sector/zone axes. TRIDENT's geometric
+setup (`extend_rad_transfer_grids` -> `path_distribution_geometric`,
+POSEIDON `transmission.py:289-529, 87-285`) has output array shapes
+(`N_phi`, `N_zones`, `theta_edge_all`) that depend on scalar
+inputs `f_cloud`, `phi_0`, `theta_0`, `enable_deck` through
+`np.append` / `np.sort` / `np.unique`-style operations. A
+line-for-line lax-rewrite with fixed-maximum padding is feasible
+but introduces a large surface (geometry + path-integral + tau-vert)
+that doesn't fit in the v1-C scope alongside the other concurrent
+v1 phases.
+
+The shipped v1-C entry point (`_jax_transmission.TRIDENT_callback`,
+`_compute_spectrum.compute_transmission_spectrum_jit`) wraps the
+full numpy `_transmission.TRIDENT` in `jax.pure_callback`. This is
+fully traceable under `jax.jit` and `jax.make_jaxpr` (the v1-C gate
+requirement) and bit-exact with POSEIDON (parity tests pass at
+`rtol=0, atol=0`). The relaxation is:
+
+- `jax.grad` through `TRIDENT_callback` requires a custom VJP rule
+  (not provided by `pure_callback`). This is deferred to v1-E,
+  where the gradient gate is defined.
+- The forward computation runs on the host CPU inside the callback
+  rather than on the JAX device. For TRIDENT this is the same code
+  path as v0.5 numpy and matches the v1-C gate (which only requires
+  `jax.jit(compute_spectrum)(spectrum_type='transmission', ...)` to
+  match numpy at rtol=1e-13, not GPU acceleration).
+
+The pure-`jnp` kernels for the vectorisable post-processing
+(`compute_tau_vert_jax`, `trans_from_path_tau_jax`) are exposed in
+`_jax_transmission.py` and tested at `rtol=1e-13` parity against
+the numpy oracle; they will compose into the lax-native TRIDENT
+when v1-E lands.
+
 ### v1-A `_jax_interpolate.regular_grid_interp_linear` boundary handling
 
 The v1-A plan specifies "linear extrapolation off (boundary clip)" for
