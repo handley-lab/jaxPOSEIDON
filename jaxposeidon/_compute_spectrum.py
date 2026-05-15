@@ -11,7 +11,7 @@ Supported envelope:
   'direct_emission'}; the emission paths cover the no-scattering /
   no-surface case via emission_single_stream. thermal_scattering=True
   and surface=True are the Phase 0.5.13d/e follow-ups.
-- opacity_treatment='opacity_sampling' only.
+- opacity_treatment in {'opacity_sampling', 'line_by_line'}.
 - device='cpu' only.
 - cloud_model in {'cloud-free', 'MacMad17'} only.
 - N_sectors/N_zones from TRIDENT geometry (1D or cloud_dim=2 patchy).
@@ -29,6 +29,7 @@ from jaxposeidon._emission import (
     determine_photosphere_radii,
     emission_single_stream,
 )
+from jaxposeidon._lbl import extinction_LBL
 from jaxposeidon._opacities import extinction
 from jaxposeidon._transmission import TRIDENT
 
@@ -98,15 +99,10 @@ def compute_spectrum(
         raise NotImplementedError(
             f"spectrum_type={spectrum_type!r} not a known POSEIDON option"
         )
-    if opac["opacity_treatment"] != "opacity_sampling":
-        # extinction_LBL orchestrator is the follow-up — the kernel
-        # compute_kappa_LBL is implemented in _lbl.py (Phase 0.5.15), but
-        # compute_spectrum still expects the opacity-sampling opac dict
-        # layout. Once extinction_LBL lands the guard relaxes.
+    if opac["opacity_treatment"] not in ("opacity_sampling", "line_by_line"):
         raise NotImplementedError(
             f"opacity_treatment={opac['opacity_treatment']!r}: only "
-            "'opacity_sampling' wired into compute_spectrum currently; "
-            "extinction_LBL orchestrator is the Phase 0.5.15 follow-up."
+            "'opacity_sampling' and 'line_by_line' are supported."
         )
     is_emission = "emission" in spectrum_type
     if is_emission and (model.get("thermal_scattering") or model.get("reflection")):
@@ -209,13 +205,7 @@ def compute_spectrum(
     if not isinstance(P_cloud, np.ndarray):
         P_cloud = np.array([P_cloud])
 
-    sigma_stored = opac["sigma_stored"]
-    CIA_stored = opac["CIA_stored"]
     Rayleigh_stored = opac["Rayleigh_stored"]
-    ff_stored = opac["ff_stored"]
-    bf_stored = opac["bf_stored"]
-    T_fine = opac["T_fine"]
-    log_P_fine = opac["log_P_fine"]
 
     # ----- Phase 4: runtime extinction ---------------------------------------
     if len(kappa_contributions):
@@ -230,7 +220,45 @@ def compute_spectrum(
         kappa_gas = np.zeros((len(P), N_sectors, N_zones, N_wl))
         kappa_Ray = np.zeros_like(kappa_gas)
         kappa_cloud = np.zeros_like(kappa_gas)
+    elif opac["opacity_treatment"] == "line_by_line":
+        kappa_gas, kappa_Ray, kappa_cloud = extinction_LBL(
+            chemical_species,
+            active_species,
+            CIA_pairs,
+            ff_pairs,
+            bf_species,
+            n,
+            T,
+            P,
+            wl,
+            X,
+            X_active,
+            X_CIA,
+            X_ff,
+            X_bf,
+            a,
+            gamma,
+            P_cloud,
+            kappa_cloud_0,
+            Rayleigh_stored,
+            enable_haze,
+            enable_deck,
+            enable_surface=(1 if surface else 0),
+            N_sectors=N_sectors,
+            N_zones=N_zones,
+            P_surf=P_surf,
+            opacity_database=opac["opacity_database"],
+            disable_continuum=disable_continuum,
+            suppress_print=suppress_print,
+            database_version=opac["database_version"],
+        )
     else:
+        sigma_stored = opac["sigma_stored"]
+        CIA_stored = opac["CIA_stored"]
+        ff_stored = opac["ff_stored"]
+        bf_stored = opac["bf_stored"]
+        T_fine = opac["T_fine"]
+        log_P_fine = opac["log_P_fine"]
         kappa_gas, kappa_Ray, kappa_cloud, _kappa_sep = extinction(
             chemical_species,
             active_species,

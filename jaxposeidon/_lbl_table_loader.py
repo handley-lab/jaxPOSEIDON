@@ -6,11 +6,9 @@ Setup-only: h5py / file I/O permitted. Must not be called from inside
 The LBL HDF5 tables (`Opacity_database_v1.3.hdf5` ~10+ GB,
 `Opacity_database_cia.hdf5` ~few GB) live at
 `$POSEIDON_input_data/opacity/`. The loader signatures mirror
-POSEIDON's `absorption.py:1739-1951` file-opening logic so callers can
-inject the same opened h5py.File handles consumed by `compute_kappa_LBL`.
-
-The full extinction_LBL orchestrator is a follow-up; this slice gives
-a stable place for the path-construction logic to live.
+POSEIDON's `absorption.py:1794-1818` file-opening logic; the resulting
+`(opac_file, cia_file)` handles are consumed by `extinction_LBL` in
+`jaxposeidon/_lbl.py`.
 """
 
 import os
@@ -22,10 +20,19 @@ def open_opacity_files(opacity_database="High-T", database_version="1.3"):
     """Open POSEIDON's molecular + CIA HDF5 opacity files.
 
     Bit-equivalent path-construction port of POSEIDON
-    `absorption.py:1794-1818`. Returns `(opac_file, cia_file)` open
-    h5py.File handles. Caller is responsible for closing them.
+    `absorption.py:1794-1818`, including the explicit "POSEIDON cannot
+    locate the opacity input data" exception from `1785-1791` when
+    `POSEIDON_input_data` is unset. Returns `(opac_file, cia_file)`
+    open h5py.File handles; the caller is responsible for closing them.
     """
-    input_file_path = os.environ["POSEIDON_input_data"]  # noqa: SIM112
+    input_file_path = os.environ.get("POSEIDON_input_data")  # noqa: SIM112
+    if input_file_path is None:
+        raise Exception(
+            "POSEIDON cannot locate the opacity input data.\n"
+            "Please set the 'POSEIDON_input_data' variable in "
+            "your .bashrc or .bash_profile to point to the "
+            "directory containing the POSEIDON opacity database."
+        )
 
     if opacity_database == "High-T":
         if database_version == "1.3":
