@@ -237,3 +237,112 @@ def test_extinction_LBL_multi_dim_haze_deck_parity(
     np.testing.assert_allclose(kr_ours, kr_exp, atol=0, rtol=1e-13)
     np.testing.assert_allclose(kc_ours, kc_exp, atol=0, rtol=1e-13)
     assert np.any(kc_ours > 0.0)
+
+
+def _per_slice_oracle(args, p_extLBL):
+    """Run POSEIDON.extinction_LBL per (j, k) slice and reassemble.
+
+    POSEIDON closes the HDF5 handles inside the (j, k) loop body, so it
+    cannot execute the full multi-(sector, zone) call directly. Instead
+    we invoke it once per (j, k) on 1x1 sub-input slices and stitch the
+    outputs back into 4-D arrays for parity assertions.
+    """
+    N_sectors = args["N_sectors"]
+    N_zones = args["N_zones"]
+
+    kg_ours, kr_ours, kc_ours = _lbl.extinction_LBL(**args)
+
+    kg_exp = np.zeros_like(kg_ours)
+    kr_exp = np.zeros_like(kr_ours)
+    kc_exp = np.zeros_like(kc_ours)
+
+    for j in range(N_sectors):
+        for k in range(N_zones):
+            sub = dict(args)
+            sub["N_sectors"] = 1
+            sub["N_zones"] = 1
+            sub["T"] = args["T"][:, j : j + 1, k : k + 1].copy()
+            sub["n"] = args["n"][:, j : j + 1, k : k + 1].copy()
+            sub["X"] = args["X"][:, :, j : j + 1, k : k + 1].copy()
+            sub["X_active"] = args["X_active"][:, :, j : j + 1, k : k + 1].copy()
+            sub["X_cia"] = args["X_cia"][:, :, :, j : j + 1, k : k + 1].copy()
+            sub["X_ff"] = args["X_ff"][:, :, :, j : j + 1, k : k + 1].copy()
+            sub["X_bf"] = args["X_bf"][:, :, j : j + 1, k : k + 1].copy()
+
+            kg_jk, kr_jk, kc_jk = p_extLBL(**sub)
+            kg_exp[:, j : j + 1, k : k + 1, :] = kg_jk
+            kr_exp[:, j : j + 1, k : k + 1, :] = kr_jk
+            kc_exp[:, j : j + 1, k : k + 1, :] = kc_jk
+
+    return (kg_ours, kr_ours, kc_ours), (kg_exp, kr_exp, kc_exp)
+
+
+@pytest.mark.parametrize("N_sectors,N_zones", [(2, 1), (1, 2), (2, 2)])
+def test_extinction_LBL_multi_dim_ff_bf_parity(
+    tmp_path, monkeypatch, N_sectors, N_zones
+):
+    """Multi-(sector, zone) parity with H-minus free-free + bound-free."""
+    from POSEIDON.absorption import extinction_LBL as p_extLBL
+
+    monkeypatch.setenv("POSEIDON_input_data", str(tmp_path))
+    args = _build_call_args(tmp_path, N_sectors, N_zones, seed=91)
+    N_layers = len(args["P"])
+    args["ff_pairs"] = ["H-ff"]
+    args["bf_species"] = ["H-bf"]
+    args["X_ff"] = np.full((2, 1, N_layers, N_sectors, N_zones), 1.0e-5)
+    args["X_bf"] = np.full((1, N_layers, N_sectors, N_zones), 1.0e-5)
+
+    (kg_ours, kr_ours, kc_ours), (kg_exp, kr_exp, kc_exp) = _per_slice_oracle(
+        args, p_extLBL
+    )
+
+    np.testing.assert_allclose(kg_ours, kg_exp, atol=1e-50, rtol=1e-5)
+    np.testing.assert_allclose(kr_ours, kr_exp, atol=0, rtol=1e-13)
+    np.testing.assert_allclose(kc_ours, kc_exp, atol=0, rtol=1e-13)
+
+
+@pytest.mark.parametrize("N_sectors,N_zones", [(2, 1), (1, 2), (2, 2)])
+def test_extinction_LBL_multi_dim_disable_continuum_parity(
+    tmp_path, monkeypatch, N_sectors, N_zones
+):
+    """Multi-(sector, zone) parity with disable_continuum=True."""
+    from POSEIDON.absorption import extinction_LBL as p_extLBL
+
+    monkeypatch.setenv("POSEIDON_input_data", str(tmp_path))
+    args = _build_call_args(tmp_path, N_sectors, N_zones, seed=92)
+    args["disable_continuum"] = True
+
+    (kg_ours, kr_ours, kc_ours), (kg_exp, kr_exp, kc_exp) = _per_slice_oracle(
+        args, p_extLBL
+    )
+
+    np.testing.assert_allclose(kg_ours, kg_exp, atol=1e-50, rtol=1e-5)
+    np.testing.assert_allclose(kr_ours, kr_exp, atol=0, rtol=1e-13)
+    np.testing.assert_allclose(kc_ours, kc_exp, atol=0, rtol=1e-13)
+    # With disable_continuum=True, Rayleigh accumulator is skipped.
+    np.testing.assert_array_equal(kr_ours, np.zeros_like(kr_ours))
+
+
+@pytest.mark.parametrize("N_sectors,N_zones", [(2, 1), (1, 2), (2, 2)])
+def test_extinction_LBL_multi_dim_enable_surface_parity(
+    tmp_path, monkeypatch, N_sectors, N_zones
+):
+    """Multi-(sector, zone) parity with enable_surface=1."""
+    from POSEIDON.absorption import extinction_LBL as p_extLBL
+
+    monkeypatch.setenv("POSEIDON_input_data", str(tmp_path))
+    args = _build_call_args(tmp_path, N_sectors, N_zones, seed=93)
+    args["enable_surface"] = 1
+    args["P_surf"] = 1.0e-1
+
+    (kg_ours, kr_ours, kc_ours), (kg_exp, kr_exp, kc_exp) = _per_slice_oracle(
+        args, p_extLBL
+    )
+
+    # rtol relaxed to 1e-4 to cover float32 cross-section round-off
+    # accumulated across N_species_active * N_layers contributions in
+    # the per-(j, k) seed sampled here.
+    np.testing.assert_allclose(kg_ours, kg_exp, atol=1e-50, rtol=1e-4)
+    np.testing.assert_allclose(kr_ours, kr_exp, atol=0, rtol=1e-13)
+    np.testing.assert_allclose(kc_ours, kc_exp, atol=0, rtol=1e-13)
+    assert np.any(kg_ours >= 1.0e249)
