@@ -20,12 +20,13 @@ def open_opacity_files(opacity_database="High-T", database_version="1.3"):
     """Open POSEIDON's molecular + CIA HDF5 opacity files.
 
     Bit-equivalent path-construction port of POSEIDON
-    `absorption.py:1794-1818`. Returns `(opac_file, cia_file)` open
-    h5py.File handles. Caller is responsible for closing them.
+    `absorption.py:1794-1818`, including the explicit "POSEIDON cannot
+    locate the opacity input data" exception from `1785-1791` when
+    `POSEIDON_input_data` is unset. Returns `(opac_file, cia_file)`
+    open h5py.File handles; the caller is responsible for closing them.
     """
     input_file_path = os.environ.get("POSEIDON_input_data")  # noqa: SIM112
     if input_file_path is None:
-        # Mirrors POSEIDON `absorption.py:1785-1791`.
         raise Exception(
             "POSEIDON cannot locate the opacity input data.\n"
             "Please set the 'POSEIDON_input_data' variable in "
