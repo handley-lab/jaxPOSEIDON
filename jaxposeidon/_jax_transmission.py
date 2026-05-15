@@ -34,7 +34,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from jaxposeidon import _transmission
+jax.config.update("jax_enable_x64", True)
+
+from jaxposeidon import _transmission  # noqa: E402
 
 
 def TRIDENT_callback(

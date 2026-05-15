@@ -411,6 +411,117 @@ def test_compute_tau_vert_jax_matches_numpy_cloudy_2zone_2sector():
     np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
 
 
+def test_compute_tau_vert_jax_matches_numpy_multi_back_sector_zone():
+    """N_sectors_back>1 and N_zones_back>1 with nontrivial j_sector_back / k_zone_back."""
+    rng = np.random.default_rng(11)
+    N_layers, N_wl = 15, 5
+    N_sectors_back, N_zones_back = 3, 4
+    N_phi, N_zones = 5, 6
+    kappa_clear = rng.uniform(
+        0, 1e-5, size=(N_layers, N_sectors_back, N_zones_back, N_wl)
+    )
+    kappa_cloud = rng.uniform(
+        0, 1e-6, size=(N_layers, N_sectors_back, N_zones_back, N_wl)
+    )
+    dr = rng.uniform(1e3, 1e5, size=(N_layers, N_sectors_back, N_zones_back))
+    j_sector = np.array([0, 1, 2, 3, 4], dtype=np.int64)
+    j_sector_back = np.array([0, 2, 1, 2, 0], dtype=np.int64)
+    k_zone_back = np.array([0, 3, 1, 2, 0, 3], dtype=np.int64)
+    cloudy_zones = np.array([1, 0, 1, 0, 1, 0], dtype=np.int64)
+    cloudy_sectors = np.array([1, 0, 1, 0, 1], dtype=np.int64)
+    ref = _transmission.compute_tau_vert(
+        N_phi=N_phi,
+        N_layers=N_layers,
+        N_zones=N_zones,
+        N_wl=N_wl,
+        j_sector=j_sector,
+        j_sector_back=j_sector_back,
+        k_zone_back=k_zone_back,
+        cloudy_zones=cloudy_zones,
+        cloudy_sectors=cloudy_sectors,
+        kappa_clear=kappa_clear,
+        kappa_cloud=kappa_cloud,
+        dr=dr,
+    )
+    ours = np.asarray(
+        compute_tau_vert_jax(
+            jnp.asarray(j_sector),
+            jnp.asarray(j_sector_back),
+            jnp.asarray(k_zone_back),
+            jnp.asarray(cloudy_zones),
+            jnp.asarray(cloudy_sectors),
+            jnp.asarray(kappa_clear),
+            jnp.asarray(kappa_cloud),
+            jnp.asarray(dr),
+        )
+    )
+    np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
+
+
+# ---------------------------------------------------------------------------
+# POSEIDON oracle parity (TRIDENT is directly callable -- per CLAUDE.md §5)
+# ---------------------------------------------------------------------------
+def _poseidon_TRIDENT(args):
+    from POSEIDON.transmission import TRIDENT as p_TRIDENT
+
+    return p_TRIDENT(
+        args["P"],
+        args["r"],
+        args["r_up"],
+        args["r_low"],
+        args["dr"],
+        args["wl"],
+        args["kappa_clear"],
+        args["kappa_cloud"],
+        args["enable_deck"],
+        args["enable_haze"],
+        args["b_p"],
+        args["y_p"],
+        args["R_s"],
+        args["f_cloud"],
+        args["phi_0"],
+        args["theta_0"],
+        args["phi_edge"],
+        args["theta_edge"],
+    )
+
+
+def test_TRIDENT_jit_canonical_rayleigh_1D_matches_POSEIDON():
+    atm = _canonical_1D_atmosphere()
+    args = _trident_kwargs(atm)
+    ours = _run_under_jit(args)
+    ref = _poseidon_TRIDENT(args)
+    np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
+
+
+def test_TRIDENT_jit_cloud_deck_1D_matches_POSEIDON():
+    atm = _canonical_1D_atmosphere()
+    atm["kappa_cloud"] = 1.0e-5 * np.ones_like(atm["kappa_cloud"])
+    args = _trident_kwargs(atm, enable_deck=1, f_cloud=1.0, theta_0=-90.0)
+    ours = _run_under_jit(args)
+    ref = _poseidon_TRIDENT(args)
+    np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
+
+
+def test_TRIDENT_jit_patchy_cloud_dim2_matches_POSEIDON():
+    atm = _canonical_1D_atmosphere()
+    atm["kappa_cloud"] = 5.0e-6 * np.ones_like(atm["kappa_cloud"])
+    args = _trident_kwargs(atm, enable_deck=1, f_cloud=0.4, phi_0=-45.0, theta_0=-90.0)
+    ours = _run_under_jit(args)
+    ref = _poseidon_TRIDENT(args)
+    np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
+
+
+def test_TRIDENT_jit_3D_multi_sector_zone_matches_POSEIDON():
+    atm = _canonical_3D_atmosphere()
+    phi_edge = np.linspace(-np.pi / 2.0, np.pi / 2.0, atm["r"].shape[1] + 1)
+    theta_edge = np.linspace(-np.pi / 2.0, np.pi / 2.0, atm["r"].shape[2] + 1)
+    args = _trident_kwargs(atm, phi_edge=phi_edge, theta_edge=theta_edge)
+    ours = _run_under_jit(args)
+    ref = _poseidon_TRIDENT(args)
+    np.testing.assert_allclose(ours, ref, rtol=1e-13, atol=1e-15)
+
+
 def test_trans_from_path_tau_jax_matches_numpy():
     """Pure-jnp Beer-Lambert chord kernel parity."""
     rng = np.random.default_rng(4)
