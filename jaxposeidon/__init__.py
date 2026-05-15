@@ -27,7 +27,7 @@ import jax as _jax
 # explicitly where applicable; we mirror that locally, not globally.
 _jax.config.update("jax_enable_x64", True)
 
-__version__ = "0.5.8"
+__version__ = "1.0.0"
 
 from jaxposeidon._compute_spectrum import (
     check_atmosphere_physical,

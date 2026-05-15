@@ -317,3 +317,84 @@ level (each ported function is individually jittable and traces under
   dispatch tables and should move to `_constants.py` or to setup-only
   modules per `CLAUDE.md §3`. They function correctly today but are a
   cleanup item before the v1 JAX-trace gate.
+
+## v1.0.0 source-grep grandfather list (v1-E)
+
+The v1-E PR ships the source-grep CI gate
+(`scripts/source_grep_gate.py` + `.github/workflows/source-grep-gate.yml`)
+and the end-to-end JIT/VMAP/GRAD/make_jaxpr gate
+(`tests/test_v1_E_end_to_end.py`). The gate enforces that JAX
+hot-path modules do not perform file I/O. It tracks but **does not
+fail on** residual `import numpy` / `from scipy …` / `import h5py` /
+`import sklearn` lines in the modules listed below — those are the
+v1.0.x JAX-port follow-up surface. Each entry has a concrete
+follow-up scope.
+
+Hot-path modules fully JAX-pure at v1.0.0 (7):
+
+- `_data.py`, `_emission.py`, `_opacities.py`, `_parameters.py`,
+  `_priors.py`, `_stellar.py`, `_jax_transmission.py`.
+
+Grandfathered (11 modules; v1.0.x follow-ups; line counts as of v1-E
+merge):
+
+| Module | Forbidden import count | Follow-up scope |
+|---|---|---|
+| `_atmosphere.py` | 2 | Port `compute_T_*` setup helpers + `radial_profiles` to jnp; 2D/3D `sector`/`zone` axis vmap; remove `np.zeros` allocations from `profiles(...)` (POSEIDON `atmosphere.py:536-755` non-1D paths). |
+| `_chemistry.py` | 1 | Port `interpolate_log_X_grid` Python-shape introspection guards to JAX-safe equivalents; FastChem grid lookup already uses `regular_grid_interp_linear` from v1-A. |
+| `_clouds.py` | 1 | Port `unpack_MacMad17_cloud_params` numpy-string-array dispatch to a setup-time builder in `_parameter_setup.py`; runtime kernel (`Mie_cloud`, `interpolate_sigma_Mie_grid`) is already jnp. |
+| `_compute_spectrum.py` | 1 | Top-level dispatcher cleanup: remove residual `np.array([0.0])` defaults and `np.empty` allocations in the bare-surface guard; the spectrum-type string dispatch stays in Python (setup-only). |
+| `_contributions.py` | 1 | Full JAX port of `extinction_spectral_contribution` + `extinction_pressure_contribution` (`vmap` over wavelength, `lax.fori_loop` over layers, POSEIDON-mirror branch structure preserved). |
+| `_high_res.py` | 6 | The largest grandfather surface: `h5py` data loading moves to `_lbl_table_loader.py`; `scipy.optimize.minimize` (`fit_out_transit_spec`) stays setup-only outside jit (POSEIDON convention); `scipy.ndimage.gaussian_filter1d` → `_jax_filters.gaussian_filter1d_edge`; `sklearn.decomposition.TruncatedSVD` → `jax.scipy.linalg.svd` partial-rank wrapper; `scipy.constants` → `_constants.C_M_PER_S`. |
+| `_instruments.py` | 1 | Convert `np.asarray` to `jnp.asarray` at entry; integrate setup-time `compute_instrument_indices` from `_instrument_setup.py` so the hot path is allocation-free. |
+| `_lbl.py` | 1 | Full JAX port of `compute_kappa_LBL` / `interpolate_sigma_LBL` / `interpolate_cia_LBL` / `T_interpolation_init` to jnp; orchestrator `extinction_LBL` (HDF5 I/O) splits to `_lbl_table_loader.py`. |
+| `_opacity_precompute.py` | 1 | Port `closest_index`, `prior_index`, `prior_index_V2`, and the precompute table-fill kernels to jnp; these are the indexing primitives used by both `_opacities.py` and `_lbl.py`. |
+| `_retrieval.py` | 1 | The `make_loglikelihood` closure currently uses `np.array([])` for empty parameter blocks; replace with `jnp.array([])` and ensure the closure returns under `jax.jit` for the full top-level `logp(unit_cube)` gate. |
+| `_transmission.py` | 1 | Full pure-`jnp` TRIDENT port (replaces the v1-C `pure_callback` shim — POSEIDON `transmission.py:289-944`). Out-of-scope for v1.0.0 per documented v1-C deferral. |
+
+### v1-C pure_callback lift (deferred to v1.0.x)
+
+The `_jax_transmission.TRIDENT_callback` (v1-C) routes through
+`jax.pure_callback`, which is opaque to `jax.grad`. The v1-E plan
+called for refactoring the TRIDENT geometric setup
+(`extend_rad_transfer_grids` → `path_distribution_geometric`,
+POSEIDON `transmission.py:289-529, 87-285`) into fixed-buffer
+`lax.cond` / `lax.fori_loop` / `vmap` so `jax.grad` flows through.
+
+The geometric setup produces array shapes (`N_phi`, `N_zones`,
+`theta_edge_all`) that depend on scalar inputs (`f_cloud`, `phi_0`,
+`theta_0`, `enable_deck`) through `np.append` / `np.sort` /
+`np.unique`. A line-for-line lax-rewrite with fixed-maximum padding is
+feasible but is a multi-day refactor that did not fit alongside the
+end-to-end gate landing. The grad-flow test would be a new
+`tests/test_v1_E_end_to_end.py::test_grad_through_pure_jnp_TRIDENT`
+once the pure-`jnp` `TRIDENT_jit` is ready.
+
+Tracked as v1.0.x follow-up; the pure-`jnp` `compute_tau_vert_jax` and
+`trans_from_path_tau_jax` kernels are already in `_jax_transmission.py`
+as the foundation.
+
+### v1-B 2D/3D / Mie deferred sub-items (carried to v1.0.x)
+
+- `_atmosphere.py:profiles(...)` non-1D paths (`N_sectors`/`N_zones` >
+  1) use `np.zeros(shape=(N_layers, N_sectors, N_zones))` allocations
+  that need to migrate to `jnp.zeros` and vmap over the sector/zone
+  axes. The kernels themselves are numerically correct (parity-tested
+  in `test_phase_v05_9_2d_3d.py`); the JAX-trace gate is the
+  outstanding piece.
+- `_clouds.py:Mie_cloud(...)` — aerosol-grid interpolation is jnp at
+  the leaf but `np.where`-string-array dispatch in
+  `unpack_Mie_cloud_params` needs the `_parameter_setup.py` split.
+
+### v1-E end-to-end JIT/VMAP/GRAD/make_jaxpr gate
+
+The gate at `tests/test_v1_E_end_to_end.py` verifies all five
+criteria (jit-parity vs numpy, vmap-of-jit, jit-of-vmap, grad
+finiteness, make_jaxpr success) against the *currently jit-traceable
+surface* — the leaf kernels that v1-A through v1-D made jit-able
+(`planck_lambda_arr`, `emission_single_stream`,
+`stellar_contamination_single_spot`, `TRIDENT_callback`). The
+top-level `logp(unit_cube)` gate is the v1.0.x follow-up as the
+grandfathered modules above are ported and the
+`_compute_spectrum.compute_spectrum` outer dispatcher migrates from
+Python-string dispatch to a JAX-traceable closure.
