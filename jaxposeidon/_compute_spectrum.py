@@ -348,8 +348,8 @@ def compute_spectrum(
             sigma_Mie_array=sigma_ext_cloud,
         )
 
-    if cloud_model == "eddysed":
-        kappa_cloud = np.array(atmosphere["kappa_cloud_eddysed"])
+        if cloud_model == "eddysed":
+            kappa_cloud = np.array(atmosphere["kappa_cloud_eddysed"])
 
     if is_emission:
         if "dayside" in spectrum_type:

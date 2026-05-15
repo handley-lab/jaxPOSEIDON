@@ -179,3 +179,92 @@ def test_eddysed_input_loader_roundtrip(tmp_path):
     np.testing.assert_array_equal(k4[:, 0, 0, :], kappa)
     np.testing.assert_array_equal(g4[:, 0, 0, :], g)
     np.testing.assert_array_equal(w4[:, 0, 0, :], w)
+
+
+def _poseidon_defaults(**overrides):
+    """POSEIDON.parameters.assign_free_params requires all 36 positional
+    args; this dict mirrors the same defaults used in
+    test_phase_v05_11_stellar.py."""
+    defaults = dict(
+        param_species=[],
+        bulk_species=["H2", "He"],
+        object_type="transiting",
+        PT_profile="isotherm",
+        X_profile="isochem",
+        cloud_model="cloud-free",
+        cloud_type="deck",
+        gravity_setting="fixed",
+        mass_setting="fixed",
+        stellar_contam=None,
+        offsets_applied=None,
+        error_inflation=None,
+        PT_dim=1,
+        X_dim=1,
+        cloud_dim=1,
+        TwoD_type=None,
+        TwoD_param_scheme="difference",
+        species_EM_gradient=[],
+        species_DN_gradient=[],
+        species_vert_gradient=[],
+        Atmosphere_dimension=1,
+        opaque_Iceberg=False,
+        surface=False,
+        sharp_DN_transition=False,
+        sharp_EM_transition=False,
+        reference_parameter="R_p_ref",
+        disable_atmosphere=False,
+        aerosol_species=[],
+        log_P_slope_arr=[-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0],
+        number_P_knots=0,
+        PT_penalty=False,
+        high_res_method=None,
+        alpha_high_res_option="log",
+        fix_alpha_high_res=False,
+        fix_W_conv_high_res=False,
+        fix_beta_high_res=True,
+        fix_Delta_phi_high_res=True,
+        lognormal_logwidth_free=False,
+        surface_components=[],
+        surface_model="gray",
+        surface_percentage_option="linear",
+        thermal=True,
+        reflection=False,
+    )
+    defaults.update(overrides)
+    return defaults
+
+
+@pytest.mark.parametrize("cloud_dim", [1, 2])
+def test_assign_free_params_eddysed_parity(cloud_dim):
+    """Mirror POSEIDON parameters.py:978-985 eddysed parameter ordering."""
+    from POSEIDON.parameters import assign_free_params as p_assign
+
+    from jaxposeidon._parameter_setup import assign_free_params as j_assign
+
+    kw = _poseidon_defaults(cloud_model="eddysed", cloud_dim=cloud_dim)
+    j_params, *_ = j_assign(**kw)
+    p_params, *_ = p_assign(**kw)
+    np.testing.assert_array_equal(j_params, p_params)
+
+
+def test_compute_spectrum_eddysed_skipped_when_kappa_contributions_provided():
+    """Mirrors POSEIDON: the eddysed overwrite lives inside the
+    extinction() branch only (core.py:1685-1700), so when the caller
+    supplies pre-built kappa_contributions the eddysed dispatch is
+    bypassed."""
+    planet, star, model, atmosphere, opac, wl = _build_eddysed_oracle()
+    N_layers, _, _, N_wl = atmosphere["kappa_cloud_eddysed"].shape
+    contributions = (
+        np.ones((N_layers, 1, 1, N_wl)) * 1.0e-12,
+        np.ones((N_layers, 1, 1, N_wl)) * 1.0e-13,
+        np.ones((N_layers, 1, 1, N_wl)) * 1.0e-14,
+        np.ones((N_layers, 1, 1, 1, N_wl)) * 1.0e-14,
+    )
+    s_passthrough = j_compute_spectrum(
+        planet, star, model, atmosphere, opac, wl, kappa_contributions=contributions
+    )
+    atmosphere["kappa_cloud_eddysed"] = atmosphere["kappa_cloud_eddysed"] * 1.0e6
+    s_modified = j_compute_spectrum(
+        planet, star, model, atmosphere, opac, wl, kappa_contributions=contributions
+    )
+    np.testing.assert_array_equal(s_passthrough, s_modified)
