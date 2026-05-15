@@ -16,3 +16,6 @@ POSEIDON's `scipy.constants.c` usage in `high_res.py`.
 """
 
 C_M_PER_S = 299792458.0
+
+PLANCK_H = 6.62607015e-34
+BOLTZMANN_K = 1.380649e-23

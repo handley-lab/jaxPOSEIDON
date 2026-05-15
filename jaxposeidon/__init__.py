@@ -1,11 +1,14 @@
-"""jaxposeidon — JAX-friendly port of POSEIDON's transmission forward model.
+"""jaxposeidon — JAX-friendly port of POSEIDON's forward model.
 
-Status: v0 complete (Phases 0-10 approved; Phase 11 packaging in progress).
-The v0 forward model is a numpy port validated against POSEIDON. The
-JAX-traceable migration and the BlackJAX NSS sampler run are v1 work
-items.
+Status: v1.0.0 — partial JAX-trace coverage. The v1-A through v1-E
+JAX migrations have landed; seven hot-path modules (`_data`,
+`_emission`, `_jax_transmission`, `_opacities`, `_parameters`,
+`_priors`, `_stellar`) are fully JAX-pure, and eleven remain
+grandfathered as v1.0.x follow-ups (see ``MISMATCHES.md`` →
+"v1.0.0 source-grep grandfather list"). The BlackJAX NSS sampler
+run consumes the jit-traceable surface today via the leaf kernels.
 
-Public API (post-Phase 9):
+Public API:
     jaxposeidon.compute_spectrum
     jaxposeidon.check_atmosphere_physical
     jaxposeidon.bin_spectrum_to_data
@@ -27,7 +30,7 @@ import jax as _jax
 # explicitly where applicable; we mirror that locally, not globally.
 _jax.config.update("jax_enable_x64", True)
 
-__version__ = "0.5.8"
+__version__ = "1.0.0"
 
 from jaxposeidon._compute_spectrum import (
     check_atmosphere_physical,

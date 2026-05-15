@@ -13,13 +13,14 @@ dict is provided here as a thin JAX-traceable wrapper that supports
 
 import jax
 import jax.numpy as jnp
-import scipy.constants as sc
+
+from jaxposeidon._constants import BOLTZMANN_K, C_M_PER_S, PLANCK_H
 
 jax.config.update("jax_enable_x64", True)
 
-_H = float(sc.h)
-_C = float(sc.c)
-_K = float(sc.k)
+_H = PLANCK_H
+_C = C_M_PER_S
+_K = BOLTZMANN_K
 
 
 def planck_lambda(T, wl):

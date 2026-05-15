@@ -19,15 +19,15 @@ shape constants (N_layer, N_wl, Gauss_quad) are treated as static under
 
 import jax
 import jax.numpy as jnp
-import numpy as np
-import scipy.constants as sc
 from jax import lax
+
+from jaxposeidon._constants import BOLTZMANN_K, C_M_PER_S, PLANCK_H
 
 jax.config.update("jax_enable_x64", True)
 
-_H = float(sc.h)
-_C = float(sc.c)
-_K = float(sc.k)
+_H = PLANCK_H
+_C = C_M_PER_S
+_K = BOLTZMANN_K
 
 
 def planck_lambda_arr(T, wl):
@@ -852,28 +852,28 @@ def build_surf_reflect(
     if surface or albedo_deck != -1:
         if surface:
             if surface_model == "gray":
-                surf_reflect = np.zeros_like(wl)
+                surf_reflect = jnp.zeros_like(wl)
                 surf_reflect_array = []
             elif surface_model == "constant":
-                surf_reflect = np.full_like(wl, albedo_surf)
+                surf_reflect = jnp.full_like(wl, albedo_surf)
                 surf_reflect_array = []
             elif surface_model == "lab_data":
                 surf_reflect_array = interpolate_surface_components(
                     wl, surface_components, surface_component_albedos
                 )
                 if surface_percentage_apply_to == "albedos":
-                    surf_reflect = np.zeros_like(wl)
+                    surf_reflect = jnp.zeros_like(wl)
                     for n in range(len(surface_component_percentages)):
                         surf_reflect += (
                             surface_component_percentages[n] * surf_reflect_array[n]
                         )
                 else:
-                    surf_reflect = np.full_like(wl, -1.0)
+                    surf_reflect = jnp.full_like(wl, -1.0)
         else:
-            surf_reflect = np.full_like(wl, albedo_deck)
+            surf_reflect = jnp.full_like(wl, albedo_deck)
             surf_reflect_array = []
     else:
-        surf_reflect = np.full_like(wl, -1.0)
+        surf_reflect = jnp.full_like(wl, -1.0)
         surf_reflect_array = []
     return surf_reflect, surf_reflect_array
 
@@ -915,7 +915,7 @@ def assign_assumptions_and_compute_single_stream_emission(
     from jaxposeidon._surface_setup import find_nearest_less_than
 
     if cloud_dim == 2:
-        kappa_cloud_clear = np.zeros_like(kappa_cloud)
+        kappa_cloud_clear = jnp.zeros_like(kappa_cloud)
         kappa_tot_clear = (
             kappa_gas[:, 0, zone_idx, :]
             + kappa_Ray[:, 0, zone_idx, :]

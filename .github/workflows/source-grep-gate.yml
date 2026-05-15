@@ -1,0 +1,17 @@
+name: Source-grep gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  source-grep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enforce no forbidden imports in JAX hot-path modules
+        run: |
+          python scripts/source_grep_gate.py
