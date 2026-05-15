@@ -1,6 +1,6 @@
 """Line-by-line extinction (kernel + orchestrator).
 
-Ports POSEIDON `absorption.py:204-236, 1386-1593, 1627-1951`:
+Ports POSEIDON `absorption.py:204-236, 1386-1593, 1627-1736, 1739-1951`:
 - `T_interpolation_init` (temperature interpolation index/weight setup),
 - `interpolate_cia_LBL` (CIA cross-section interpolation to layer T),
 - `interpolate_sigma_LBL` (per-(P,T) molecular cross-section interpolation),
