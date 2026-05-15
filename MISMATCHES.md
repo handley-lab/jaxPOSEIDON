@@ -5,6 +5,24 @@ POSEIDON reference outputs.
 
 ## Open numerical mismatches
 
+### Phase 0.5.15c LBL handle re-open for multi-(sector, zone)
+
+POSEIDON `absorption.py:1739-1951` opens the molecular and CIA HDF5
+opacity handles once before the `(N_sectors, N_zones)` loop, then closes
+both inside the loop body (`cia_file.close()` at line 1859 and
+`opac_file.close()` at line 1936). For `N_sectors > 1` or `N_zones > 1`
+subsequent iterations therefore read from closed `h5py.File` handles
+and raise. POSEIDON itself can only execute the `(1, 1)` configuration
+in the LBL path.
+
+The port re-opens both handles at the top of each `(j, k)` iteration so
+the loop is well-defined for arbitrary `(N_sectors, N_zones)`. On the
+`(1, 1)` case the observable output is identical to POSEIDON and the
+Phase 0.5.15b bit-equivalence test continues to hold. For
+`N_sectors > 1` / `N_zones > 1`, parity is asserted against POSEIDON
+run per-`(j, k)` on 1x1 sub-input slices, since the upstream function
+cannot complete the multi-dim loop.
+
 ### Phase 0.5.12 Mie single-string `aerosol_species`
 
 Same root cause as the FastChem single-string divergence below.
