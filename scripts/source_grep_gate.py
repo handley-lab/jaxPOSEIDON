@@ -118,19 +118,35 @@ GRANDFATHERED_MODULES = {
 }
 
 # File-I/O patterns are never grandfathered — even setup-flavoured
-# leftovers must move to a *_loader.py / *_setup.py module.
+# leftovers must move to a *_loader.py / *_setup.py module. These
+# patterns also bypass the per-line ``v1-grep-skip`` opt-out: file I/O
+# in a hot-path module is always a bug, regardless of grandfather
+# status.
 HARD_FORBIDDEN_PATTERNS = [
     (re.compile(r"\bopen\s*\("), "open(...)"),
     (re.compile(r"\bpd\.read_csv\s*\("), "pd.read_csv(...)"),
+    (
+        re.compile(r"\bpd\.read_(?:table|hdf|parquet|feather|json|excel)\s*\("),
+        "pd.read_*(...)",
+    ),
+    (
+        re.compile(r"\bnp\.(?:load|loadtxt|genfromtxt|fromfile|memmap)\s*\("),
+        "np.load*(...)",
+    ),
+    (re.compile(r"\bjnp\.(?:load|loadtxt|genfromtxt|fromfile)\s*\("), "jnp.load*(...)"),
+    (re.compile(r"\bh5py\.File\s*\("), "h5py.File(...)"),
+    (re.compile(r"\.open\s*\(\s*['\"]"), "Path.open('...')"),
 ]
 
 
 def scan(
-    path: Path, patterns: list[tuple[re.Pattern, str]]
+    path: Path,
+    patterns: list[tuple[re.Pattern, str]],
+    honor_optout: bool = True,
 ) -> list[tuple[int, str, str]]:
     bad = []
     for lineno, line in enumerate(path.read_text().splitlines(), 1):
-        if OPTOUT_MARKER in line:
+        if honor_optout and OPTOUT_MARKER in line:
             continue
         stripped = line.split("#", 1)[0]
         if not stripped.strip():
@@ -180,11 +196,22 @@ def main() -> int:
             continue
         if name in GRANDFATHERED_MODULES:
             grandfather_counts[name] = len(scan(path, FORBIDDEN_PATTERNS))
+            # In grandfathered modules the whole module is a v1.0.x
+            # JAX-port follow-up; per-line ``v1-grep-skip`` is honored
+            # for hard-forbidden patterns too, with the rationale
+            # captured in MISMATCHES.md → "v1.0.0 source-grep
+            # grandfather list".
             for lineno, label, line in scan(path, HARD_FORBIDDEN_PATTERNS):
                 hard_violations.append((name, lineno, label, line))
         else:
+            # In fully-pure hot-path modules the per-line ``v1-grep-skip``
+            # opt-out NEVER applies to hard-forbidden file-I/O patterns.
             for lineno, label, line in scan(path, FORBIDDEN_PATTERNS):
                 full_violations.append((name, lineno, label, line))
+            for lineno, label, line in scan(
+                path, HARD_FORBIDDEN_PATTERNS, honor_optout=False
+            ):
+                hard_violations.append((name, lineno, label, line))
 
     failed = False
     if full_violations:

@@ -102,8 +102,11 @@ emission/dispatch surface) and the v1-E end-to-end gate. The
 relaxations are:
 
 - `jax.grad` through `TRIDENT_callback` requires a custom VJP rule
-  (not provided by `pure_callback`). This is deferred to v1-E,
-  where the gradient gate is defined.
+  (not provided by `pure_callback`). This is now carried to v1.0.x
+  (see "v1-C pure_callback lift (deferred to v1.0.x)" below); the
+  v1-E gate exercises `jax.grad` against the leaf kernels that have
+  a pure-`jnp` foundation (`planck_lambda_arr`, `emission_single_stream`,
+  `stellar_contamination_single_spot`).
 - The forward computation runs on the host CPU inside the callback
   rather than on the JAX device. For TRIDENT this is the same code
   path as v0.5 numpy and matches the v1-C gate (which only requires
@@ -114,7 +117,11 @@ The pure-`jnp` kernels for the vectorisable post-processing
 (`compute_tau_vert_jax`, `trans_from_path_tau_jax`) are exposed in
 `_jax_transmission.py` and tested at `rtol=1e-13` parity against
 the numpy oracle; they will compose into the lax-native TRIDENT
-when v1-E lands.
+when the v1.0.x follow-up lands (see "v1-C pure_callback lift
+(deferred to v1.0.x)" below — the v1-E end-to-end gate ships with the
+`pure_callback` boundary intact, exercising `jax.jit` and
+`jax.make_jaxpr` on `TRIDENT_callback` while `jax.grad` is exercised
+on the pure-`jnp` leaf kernels).
 
 ### v1-A `_jax_interpolate.regular_grid_interp_linear` boundary handling
 
@@ -398,3 +405,13 @@ top-level `logp(unit_cube)` gate is the v1.0.x follow-up as the
 grandfathered modules above are ported and the
 `_compute_spectrum.compute_spectrum` outer dispatcher migrates from
 Python-string dispatch to a JAX-traceable closure.
+
+The single-stream emission parity check in
+`test_emission_single_stream_jit_matches_poseidon` runs at
+`rtol=1e-12` rather than the strict `rtol=1e-13` default. This is
+the FP-reorder relaxation already documented for the v1-D Toon
+emission flow (Thomas tridiagonal `lax.scan` vs numba in-place loop);
+the single-stream solver shares the same `lax.scan` reduction over
+layers. The relaxation is consistent with the v1-D entries above
+(rtol=1e-13 → 1e-13 for the leaf reductions, rtol=1e-12 once the
+layer-stacked accumulation is included) and not a new mismatch.

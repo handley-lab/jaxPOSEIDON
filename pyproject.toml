@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "jaxposeidon"
 version = "1.0.0"
-description = "JAX-native port of POSEIDON's transmission-spectroscopy forward model."
+description = "JAX-friendly port of POSEIDON's transmission-spectroscopy forward model (v1.0.0 ships partial JAX-trace coverage; see MISMATCHES.md)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
