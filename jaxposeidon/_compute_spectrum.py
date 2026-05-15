@@ -6,13 +6,14 @@ Faithful port of the v0-supported portion of POSEIDON `core.py:1303-2132`
     atmosphere → extinction → TRIDENT → spectrum
 
 Supported envelope:
-- spectrum_type in {'transmission', 'transmission_time_average'};
-  emission / reflection / direct / dayside / nightside dispatch is the
-  Phase 0.5.13c follow-up.
-- opacity_treatment='opacity_sampling' only (line-by-line LBL is v1).
+- spectrum_type in {'transmission', 'transmission_time_average',
+  'emission', 'dayside_emission', 'nightside_emission',
+  'direct_emission'}; the emission paths cover the no-scattering /
+  no-surface case via emission_single_stream. thermal_scattering=True
+  and surface=True are the Phase 0.5.13d/e follow-ups.
+- opacity_treatment='opacity_sampling' only.
 - device='cpu' only.
-- cloud_model in {'cloud-free', 'MacMad17'} only (Mie/eddysed v1).
-- No surfaces, no thermal_scattering, no reflection.
+- cloud_model in {'cloud-free', 'MacMad17'} only.
 - N_sectors/N_zones from TRIDENT geometry (1D or cloud_dim=2 patchy).
 
 Matches POSEIDON's NaN-spectrum rejection sentinel
@@ -22,6 +23,10 @@ non-physical upstream.
 
 import numpy as np
 
+from jaxposeidon._emission import (
+    determine_photosphere_radii,
+    emission_single_stream,
+)
 from jaxposeidon._opacities import extinction
 from jaxposeidon._transmission import TRIDENT
 
@@ -88,12 +93,16 @@ def compute_spectrum(
     if disable_atmosphere:
         raise NotImplementedError("disable_atmosphere=True (bare-rock) is v1")
 
-    if spectrum_type not in ("transmission", "transmission_time_average"):
+    if spectrum_type not in (
+        "transmission",
+        "transmission_time_average",
+        "emission",
+        "dayside_emission",
+        "nightside_emission",
+        "direct_emission",
+    ):
         raise NotImplementedError(
-            f"spectrum_type={spectrum_type!r}: only 'transmission' and "
-            "'transmission_time_average' wired; emission / reflection / "
-            "direct / dayside / nightside dispatch is the Phase 0.5.13c "
-            "follow-up."
+            f"spectrum_type={spectrum_type!r} not a known POSEIDON option"
         )
     if opac["opacity_treatment"] != "opacity_sampling":
         # extinction_LBL orchestrator is the follow-up — the kernel
@@ -105,10 +114,17 @@ def compute_spectrum(
             "'opacity_sampling' wired into compute_spectrum currently; "
             "extinction_LBL orchestrator is the Phase 0.5.15 follow-up."
         )
-    if model.get("thermal_scattering") or model.get("reflection"):
-        raise NotImplementedError("thermal_scattering / reflection are v1")
+    is_emission = "emission" in spectrum_type
+    if is_emission and (model.get("thermal_scattering") or model.get("reflection")):
+        raise NotImplementedError(
+            "thermal_scattering / reflection in emission: Phase 0.5.13b Toon "
+            "solvers are ported, but their integration with compute_spectrum "
+            "is the Phase 0.5.13e follow-up."
+        )
     if model.get("surface"):
-        raise NotImplementedError("surface models are v1")
+        raise NotImplementedError(
+            "surface coupling in emission/reflection is the Phase 0.5.13d follow-up."
+        )
 
     cloud_model = model.get("cloud_model", "cloud-free")
     if cloud_model not in _V0_CLOUD_MODELS:
@@ -135,7 +151,7 @@ def compute_spectrum(
         out[:] = np.nan
         return out
 
-    # ----- unpack planet / atmosphere / model (POSEIDON core.py:1404-1466) ---
+    # Unpack planet / atmosphere / model bundles.
     b_p = planet["planet_impact_parameter"]
     R_s = star["R_s"]
     P = atmosphere["P"]
@@ -176,11 +192,10 @@ def compute_spectrum(
         else 0
     )
 
-    # ----- POSEIDON `core.py:1651-1683` numba-placeholder n_aerosol / σ_ext --
+    # Placeholders for the v0 envelope (no Mie aerosols).
     n_aerosol = np.array([np.zeros_like(r)])
     sigma_ext_cloud = np.array([np.zeros_like(wl)])
 
-    # POSEIDON `core.py:1668-1669`: ensure P_cloud is an array
     if not isinstance(P_cloud, np.ndarray):
         P_cloud = np.array([P_cloud])
 
@@ -228,13 +243,72 @@ def compute_spectrum(
         enable_Mie=0,
         n_aerosol_array=n_aerosol,
         sigma_Mie_array=sigma_ext_cloud,
-        # POSEIDON core.py passes disable_continuum to extinction_LBL only;
-        # the opacity-sampling extinction ignores it (the v0.5.17c flag
-        # remains on the function signature for LBL-mode callers but is
-        # not propagated here for opacity-sampling parity).
     )
 
-    # ----- Phase 7: TRIDENT (POSEIDON core.py:1841-1844) ---------------------
+    if is_emission:
+        if "dayside" in spectrum_type:
+            zone_idx = 0
+        elif "nightside" in spectrum_type:
+            zone_idx = -1
+        else:
+            zone_idx = 0
+
+        dz = dr[:, 0, zone_idx]
+        T_em = T[:, 0, zone_idx]
+        kappa_tot = (
+            kappa_gas[:, 0, zone_idx, :]
+            + kappa_Ray[:, 0, zone_idx, :]
+            + kappa_cloud[:, 0, zone_idx, :]
+        )
+        F_p, dtau = emission_single_stream(T_em, dz, wl, kappa_tot, Gauss_quad)
+        dtau = np.flip(dtau, axis=0)
+
+        if use_photosphere_radius:
+            R_p_eff = determine_photosphere_radii(
+                np.flip(dtau, axis=0),
+                np.flip(r_low[:, 0, zone_idx]),
+                wl,
+                photosphere_tau=2 / 3,
+            )
+        else:
+            R_p_eff = planet["planet_radius"]
+
+        d = planet.get("system_distance")
+        if d is None:
+            if "direct" in spectrum_type:
+                raise Exception(
+                    "Error: no planet system distance provided. For direct "
+                    "spectra, must set system_distance in the planet object."
+                )
+            d = 1  # cancels in transit-ratio
+
+        if "direct" in spectrum_type:
+            spectrum = (R_p_eff / d) ** 2 * F_p
+        else:
+            F_s = star["F_star"]
+            wl_s = star["wl_star"]
+            if not np.array_equiv(wl_s, wl):
+                raise Exception(
+                    "Error: wavelength grid for stellar spectrum does not "
+                    "match wavelength grid of planet spectrum. Did you "
+                    "forget to provide 'wl' to create_star?"
+                )
+            F_s_obs = (R_s / d) ** 2 * F_s
+            F_p_obs = (R_p_eff / d) ** 2 * F_p
+            spectrum = F_p_obs / F_s_obs
+
+        if save_spectrum:
+            from jaxposeidon._output import write_spectrum
+
+            write_spectrum(
+                planet_name=planet["planet_name"],
+                model_name=model["model_name"],
+                spectrum=spectrum,
+                wl=wl,
+            )
+        return spectrum
+
+    # Transmission paths (TRIDENT chord integration).
     if spectrum_type == "transmission_time_average":
         N_y = len(y_p)
         spectrum_stored = np.zeros(shape=(N_y, len(wl)))

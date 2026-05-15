@@ -133,17 +133,156 @@ def test_compute_spectrum_returns_NaN_for_temperature_out_of_fine_grid():
     "spectrum_type",
     [
         "emission",
-        "direct_emission",
         "dayside_emission",
         "nightside_emission",
     ],
 )
-def test_compute_spectrum_rejects_non_transmission_types(spectrum_type):
+def test_compute_spectrum_emission_types_matches_poseidon(spectrum_type):
+    """Phase 0.5.13c full: emission / dayside_emission / nightside_emission
+    parity vs POSEIDON for the no-scattering, no-surface case."""
+    from POSEIDON.core import compute_spectrum as p_compute_spectrum
+
     planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
-    with pytest.raises(NotImplementedError, match="spectrum_type"):
+    # POSEIDON needs a stellar spectrum for transit emission ratios.
+    star["F_star"] = np.full_like(wl, 1e7)
+    star["wl_star"] = wl
+    ours = j_compute_spectrum(
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type=spectrum_type,
+    )
+    theirs = p_compute_spectrum(
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type=spectrum_type,
+    )
+    np.testing.assert_allclose(ours, theirs, atol=0, rtol=1e-13)
+
+
+def test_compute_spectrum_direct_emission_requires_distance():
+    planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
+    with pytest.raises(Exception, match="system_distance"):
         j_compute_spectrum(
-            planet, star, model, atmosphere, opac, wl, spectrum_type=spectrum_type
+            planet,
+            star,
+            model,
+            atmosphere,
+            opac,
+            wl,
+            spectrum_type="direct_emission",
         )
+
+
+def test_compute_spectrum_direct_emission_matches_poseidon():
+    """direct_emission parity with system_distance set."""
+    from POSEIDON.core import compute_spectrum as p_compute_spectrum
+
+    planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
+    planet["system_distance"] = 10.0 * 3.086e16  # 10 pc in metres
+    star["F_star"] = np.full_like(wl, 1e7)
+    star["wl_star"] = wl
+    ours = j_compute_spectrum(
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type="direct_emission",
+    )
+    theirs = p_compute_spectrum(
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type="direct_emission",
+    )
+    np.testing.assert_allclose(ours, theirs, atol=0, rtol=1e-13)
+
+
+def test_compute_spectrum_dayside_nightside_multi_zone_matches_poseidon():
+    """N_zones=2 atmosphere with dayside=1050K and nightside=950K:
+    parity vs POSEIDON for both dayside_emission and nightside_emission."""
+    from POSEIDON.core import compute_spectrum as p_compute_spectrum
+
+    planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
+    star["F_star"] = np.full_like(wl, 1e7)
+    star["wl_star"] = wl
+
+    N_layers = atmosphere["T"].shape[0]
+    new_T = np.zeros((N_layers, 1, 2))
+    new_T[:, 0, 0] = 1050.0  # dayside
+    new_T[:, 0, 1] = 950.0  # nightside
+
+    def tile_zone(arr):
+        return np.repeat(arr, 2, axis=-1)
+
+    atmosphere = {**atmosphere}
+    atmosphere["T"] = new_T
+    atmosphere["dr"] = tile_zone(atmosphere["dr"])
+    atmosphere["r"] = tile_zone(atmosphere["r"])
+    atmosphere["r_up"] = tile_zone(atmosphere["r_up"])
+    atmosphere["r_low"] = tile_zone(atmosphere["r_low"])
+    atmosphere["n"] = tile_zone(atmosphere["n"])
+    atmosphere["X"] = np.repeat(atmosphere["X"], 2, axis=-1)
+    atmosphere["X_active"] = np.repeat(atmosphere["X_active"], 2, axis=-1)
+    atmosphere["X_CIA"] = np.repeat(atmosphere["X_CIA"], 2, axis=-1)
+    atmosphere["X_ff"] = np.repeat(atmosphere["X_ff"], 2, axis=-1)
+    atmosphere["X_bf"] = np.repeat(atmosphere["X_bf"], 2, axis=-1)
+    atmosphere["N_zones"] = 2
+    atmosphere["theta_edge"] = np.array([-np.pi / 2, 0.0, np.pi / 2])
+
+    for s_type in ("dayside_emission", "nightside_emission"):
+        ours = j_compute_spectrum(
+            planet,
+            star,
+            model,
+            atmosphere,
+            opac,
+            wl,
+            spectrum_type=s_type,
+        )
+        theirs = p_compute_spectrum(
+            planet,
+            star,
+            model,
+            atmosphere,
+            opac,
+            wl,
+            spectrum_type=s_type,
+        )
+        np.testing.assert_allclose(ours, theirs, atol=0, rtol=1e-13)
+
+    # Sanity: zone_idx=0 (dayside hotter) ≠ zone_idx=-1 (nightside cooler).
+    s_day = j_compute_spectrum(
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type="dayside_emission",
+    )
+    s_night = j_compute_spectrum(
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type="nightside_emission",
+    )
+    assert np.any(np.abs(s_day - s_night) > 0.0)
 
 
 @pytest.mark.parametrize(
@@ -161,12 +300,24 @@ def test_compute_spectrum_transmission_time_average_matches_poseidon(y_p):
 
     planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
     ours = j_compute_spectrum(
-        planet, star, model, atmosphere, opac, wl,
-        spectrum_type="transmission_time_average", y_p=y_p,
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type="transmission_time_average",
+        y_p=y_p,
     )
     theirs = p_compute_spectrum(
-        planet, star, model, atmosphere, opac, wl,
-        spectrum_type="transmission_time_average", y_p=y_p,
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
+        spectrum_type="transmission_time_average",
+        y_p=y_p,
     )
     np.testing.assert_array_equal(ours, theirs)
 
@@ -176,7 +327,12 @@ def test_compute_spectrum_transmission_time_average_unphysical_atmosphere():
     planet, star, model, atmosphere, opac, wl = _build_canonical_rayleigh_oracle()
     atmosphere["is_physical"] = False
     out = j_compute_spectrum(
-        planet, star, model, atmosphere, opac, wl,
+        planet,
+        star,
+        model,
+        atmosphere,
+        opac,
+        wl,
         spectrum_type="transmission_time_average",
         y_p=np.array([-0.2, 0.0, 0.2]),
     )
@@ -333,7 +489,7 @@ def test_compute_spectrum_unsupported_config_takes_precedence_over_NaN():
     atmosphere["T"] = np.full_like(atmosphere["T"], 5000.0)
     with pytest.raises(NotImplementedError, match="spectrum_type"):
         j_compute_spectrum(
-            planet, star, model, atmosphere, opac, wl, spectrum_type="emission"
+            planet, star, model, atmosphere, opac, wl, spectrum_type="bogus_type"
         )
 
 
