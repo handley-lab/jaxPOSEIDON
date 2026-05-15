@@ -256,6 +256,67 @@ def test_instruments_make_model_data_jit_parity():
     np.testing.assert_allclose(ours, theirs, rtol=1e-13, atol=1e-15)
 
 
+def test_tri_diag_solve_jit_matches_poseidon():
+    """JAX lax.scan Thomas solver under jit matches POSEIDON oracle at rtol=1e-13."""
+    from POSEIDON.emission import tri_diag_solve as p_tds
+
+    rng = np.random.default_rng(7)
+    L = 24
+    a = rng.uniform(-1.0, 1.0, size=L)
+    b = rng.uniform(2.0, 4.0, size=L)
+    c = rng.uniform(-1.0, 1.0, size=L)
+    d = rng.standard_normal(L)
+    ours = np.asarray(
+        jax.jit(_emission.tri_diag_solve, static_argnums=(0,))(L, a, b, c, d)
+    )
+    theirs = p_tds(L, a, b, c, d)
+    np.testing.assert_allclose(ours, theirs, rtol=1e-13, atol=1e-15)
+
+
+def test_make_model_data_jit_matches_poseidon_oracle():
+    """make_model_data under jit matches POSEIDON.instrument.make_model_data."""
+    from POSEIDON.instrument import make_model_data as p_mmd
+
+    rng = np.random.default_rng(8)
+    N = 200
+    wl = np.linspace(1.0, 5.0, N)
+    spectrum = 0.01 + 0.001 * rng.standard_normal(N)
+    sensitivity = np.ones(N)
+    bin_left = np.array([20, 80, 140])
+    bin_cent = np.array([40, 100, 160])
+    bin_right = np.array([60, 120, 180])
+    sigma = np.array([1.2, 1.5, 1.0])
+    norm = np.array([20.0, 40.0, 40.0])
+
+    ours = np.asarray(
+        jax.jit(
+            lambda spec: _instruments.make_model_data(
+                spec,
+                wl,
+                sigma,
+                sensitivity,
+                bin_left,
+                bin_cent,
+                bin_right,
+                norm,
+                photometric=False,
+            )
+        )(spectrum)
+    )
+    theirs = p_mmd(
+        spectrum,
+        wl,
+        sigma,
+        sensitivity,
+        bin_left,
+        bin_cent,
+        bin_right,
+        norm,
+        photometric=False,
+    )
+    np.testing.assert_allclose(ours, theirs, rtol=1e-13, atol=1e-15)
+
+
 def test_planck_lambda_arr_jit():
     """planck_lambda_arr under jit matches POSEIDON."""
     from POSEIDON.emission import planck_lambda_arr as p_pl

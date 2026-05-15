@@ -93,7 +93,8 @@ def bin_spectrum_to_data(spectrum, wl, data_properties):
     setup-time numpy dict from ``load_data(...)``; ``spectrum`` (and ``wl``)
     may be JAX tracers.
     """
-    N_wl = int(np.asarray(wl).shape[0])
+    # wl shape is treated as static; under jit pass wl with known shape.
+    N_wl = int(wl.shape[0])
     pieces = []
     instruments = data_properties["instruments"]
     len_data_idx = np.asarray(data_properties["len_data_idx"])

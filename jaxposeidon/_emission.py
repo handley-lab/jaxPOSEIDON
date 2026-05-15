@@ -70,8 +70,6 @@ def _gauss_quad(Gauss_quad):
                 0.5 + 0.5 * jnp.sqrt(3.0 / 5.0),
             ]
         )
-    else:
-        raise ValueError(f"Gauss_quad={Gauss_quad!r} not supported")
     return W, mu
 
 

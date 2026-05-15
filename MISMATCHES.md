@@ -188,11 +188,22 @@ honest scope-deferrals from the v0.5.0 tag.
   reflection-on-top-of-emission path adds the reflected-light albedo
   to the emission spectrum (POSEIDON `core.py:1960-1985`).
 
-The lifted paths are smoke-tested under `jax.jit` against the v0.5
-numpy oracles. Full parametric parity against POSEIDON's
-`assign_assumptions_and_compute_reflection` is a follow-up — the
-current wiring supports the `cloud_dim=1`, `aerosol_species=[]`
-configuration that covers the v0.5 envelope.
+The lifted dispatcher branches are wired through the JAX-ported
+kernels (`emission_Toon` / `reflection_Toon` / `planck_lambda*`) which
+are individually jit-parity-tested against POSEIDON oracles
+(`test_v1_D_toon_dispatch.py::test_emission_Toon_jit_matches_numpy`,
+`::test_reflection_Toon_jit_matches_numpy`, `::test_tri_diag_solve_jit_matches_poseidon`).
+The full `compute_spectrum` end-to-end JIT gate against POSEIDON
+`core.py:1832-1985` (with non-trivial cloud-scattering inputs:
+`w_cloud`, `g_cloud`, `kappa_cloud_seperate` populated by Mie /
+eddysed) is the v1-E follow-up — at v1-D the dispatcher routes those
+quantities as zero placeholders, which is sufficient for the
+cloud-free / single-aerosol envelope but not for the multi-Mie path.
+`compute_spectrum` itself is not yet `jax.jit`-able as a top-level
+callable because Python dict / string dispatch still dominates the
+function body; the JAX-traceability gate is met at the leaf-kernel
+level (each ported function is individually jittable and traces under
+`make_jaxpr`).
 
 ### Setup-api kwarg surface in `create_star` (PARTIALLY LIFTED in v1-D)
 - `stellar_contam ∈ {'one_spot', 'two_spots', 'three_spots'}` —
