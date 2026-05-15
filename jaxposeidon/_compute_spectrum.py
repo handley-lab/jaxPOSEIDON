@@ -151,7 +151,7 @@ def compute_spectrum(
         out[:] = np.nan
         return out
 
-    # ----- unpack planet / atmosphere / model (POSEIDON core.py:1404-1466) ---
+    # Unpack planet / atmosphere / model bundles.
     b_p = planet["planet_impact_parameter"]
     R_s = star["R_s"]
     P = atmosphere["P"]
@@ -192,11 +192,10 @@ def compute_spectrum(
         else 0
     )
 
-    # ----- POSEIDON `core.py:1651-1683` numba-placeholder n_aerosol / σ_ext --
+    # Placeholders for the v0 envelope (no Mie aerosols).
     n_aerosol = np.array([np.zeros_like(r)])
     sigma_ext_cloud = np.array([np.zeros_like(wl)])
 
-    # POSEIDON `core.py:1668-1669`: ensure P_cloud is an array
     if not isinstance(P_cloud, np.ndarray):
         P_cloud = np.array([P_cloud])
 
@@ -244,10 +243,6 @@ def compute_spectrum(
         enable_Mie=0,
         n_aerosol_array=n_aerosol,
         sigma_Mie_array=sigma_ext_cloud,
-        # POSEIDON core.py passes disable_continuum to extinction_LBL only;
-        # the opacity-sampling extinction ignores it (the v0.5.17c flag
-        # remains on the function signature for LBL-mode callers but is
-        # not propagated here for opacity-sampling parity).
     )
 
     if is_emission:
@@ -313,7 +308,7 @@ def compute_spectrum(
             )
         return spectrum
 
-    # ----- Phase 7: TRIDENT (POSEIDON core.py:1841-1844) ---------------------
+    # Transmission paths (TRIDENT chord integration).
     if spectrum_type == "transmission_time_average":
         N_y = len(y_p)
         spectrum_stored = np.zeros(shape=(N_y, len(wl)))
