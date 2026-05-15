@@ -29,6 +29,7 @@ from jaxposeidon._compute_spectrum import compute_spectrum
 from jaxposeidon._data import loglikelihood
 from jaxposeidon._instruments import bin_spectrum_to_data
 from jaxposeidon._priors import prior_transform
+from jaxposeidon._stellar import apply_stellar_contamination
 
 _V0_REFERENCE_PARAMETERS = {"R_p_ref", "P_ref", "R_p_ref+P_ref"}
 
@@ -123,6 +124,11 @@ def make_loglikelihood(
         spectrum = compute_spectrum(
             planet, star, model, atmosphere, opac, wl, spectrum_type="transmission"
         )
+        # Apply stellar contamination (POSEIDON `stellar.py:797-863`) between
+        # forward-model spectrum and instrument-binning. No-op when
+        # `star['stellar_contam']` is None.
+        stellar_block = rest[0] if len(rest) > 0 else np.array([])
+        spectrum = apply_stellar_contamination(spectrum, star, stellar_block)
         ymodel = bin_spectrum_to_data(spectrum, wl, data_properties)
         ll = loglikelihood(
             ymodel,

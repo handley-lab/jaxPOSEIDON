@@ -5,6 +5,29 @@ POSEIDON reference outputs.
 
 ## Open numerical mismatches
 
+### v1-D Toon Thomas tridiagonal: `lax.scan` FP-reorder
+
+POSEIDON's `tri_diag_solve` (`emission.py:534-569`) and `numba_cumsum`
+(`emission.py:966-973`) are numba `@jit(nopython=True)` Python `for`
+loops over `i` that mutate `AS[i] / DS[i] / XK[i]` in place. The v1-D
+JAX port replaces both with `lax.scan` (two-pass backward/forward for
+Thomas; cumulative sweep for cumsum). The reduction order matches
+POSEIDON's iteration order but the FMA / floating-point reduction is
+different, producing ULP-scale residuals (~1e-15 relative, ~1e-19
+absolute on standard inputs).
+
+Tests previously using `np.testing.assert_array_equal` were relaxed to
+`np.testing.assert_allclose(rtol=1e-13, atol=1e-15)` in
+`tests/test_phase_v05_13b_toon.py::test_numba_cumsum_matches_poseidon`
+and `::test_tri_diag_solve_matches_poseidon`. Likewise the v0.5
+instrument tests (`test_phase8_instruments.py`) were tightened from
+`atol=0, rtol=0` to `atol=0, rtol=1e-13` for the same reason — the
+underlying `jnp.trapezoid` reduction uses a slightly different
+pairwise sum order than `numpy.trapezoid`. The downstream Toon
+emission / reflection parity tests run at `rtol=1e-10, atol=1e-8`
+per the plan's component-specific tolerance for the source-function
+method.
+
 ### v1-A `_jax_interpolate.regular_grid_interp_linear` boundary handling
 
 The v1-A plan specifies "linear extrapolation off (boundary clip)" for
@@ -155,20 +178,28 @@ honest scope-deferrals from the v0.5.0 tag.
 - Workaround: callers can still use the function — it works — but
   requires POSEIDON installed at runtime.
 
-### Spectrum-type dispatch gaps in `_compute_spectrum`
-- `_compute_spectrum.py:84-88` — `return_albedo=True` raises (Toon
-  reflection kernel ported in 0.5.13b, dispatch wiring deferred).
-- `_compute_spectrum.py:91-101` — `spectrum_type="reflection"` raises
-  (reflection_Toon ported, dispatcher wiring deferred).
-- `_compute_spectrum.py:109-113` — `thermal_scattering=True` /
-  `reflection=True` in emission raise (Toon thermal solver ported,
-  integration deferred).
+### Spectrum-type dispatch gaps in `_compute_spectrum` (LIFTED in v1-D)
+- `return_albedo=True` — wired: emission / reflection paths return
+  `(spectrum, albedo)` when set.
+- `spectrum_type="reflection"` — wired via `reflection_Toon` from
+  `_emission.py`.
+- `thermal_scattering=True` / `reflection=True` in emission — wired
+  via `emission_Toon` and reflection_Toon respectively. The
+  reflection-on-top-of-emission path adds the reflected-light albedo
+  to the emission spectrum (POSEIDON `core.py:1960-1985`).
 
-### Setup-api kwarg surface in `create_star`
-- `_setup_api.py:80-92` — `stellar_contam`, non-blackbody
-  `stellar_grid`, `stellar_grid="custom"` still raise; the underlying
-  stellar contamination forward model (`_stellar.py`,
-  `_stellar_grid_loader.py`) is ported and unit-tested.
+The lifted paths are smoke-tested under `jax.jit` against the v0.5
+numpy oracles. Full parametric parity against POSEIDON's
+`assign_assumptions_and_compute_reflection` is a follow-up — the
+current wiring supports the `cloud_dim=1`, `aerosol_species=[]`
+configuration that covers the v0.5 envelope.
+
+### Setup-api kwarg surface in `create_star` (PARTIALLY LIFTED in v1-D)
+- `stellar_contam ∈ {'one_spot', 'two_spots', 'three_spots'}` —
+  wired: blackbody `I_phot` / `I_het` computed and threaded through
+  `_retrieval.make_loglikelihood` (POSEIDON `stellar.py:797-863`
+  pattern). pysynphot / PyMSG stellar grids remain a follow-up.
+- non-blackbody `stellar_grid="phoenix"` / `"custom"` still raise.
 
 ### Atmosphere-construction gaps
 - `_atmosphere.py:1138` — `disable_atmosphere=True` in `profiles(...)`

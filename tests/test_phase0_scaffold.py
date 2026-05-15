@@ -25,7 +25,7 @@ def test_jaxposeidon_imports():
         core,
     )
 
-    assert jaxposeidon.__version__.startswith("0.0.")
+    assert jaxposeidon.__version__.startswith("0.")
     for mod in (
         _opacity_precompute,
         _opacities,

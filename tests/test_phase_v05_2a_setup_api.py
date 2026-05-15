@@ -71,9 +71,27 @@ def test_create_star_blackbody_matches_poseidon(R_s, T_eff, log_g, Met):
     np.testing.assert_allclose(ours["F_star"], theirs["F_star"], atol=0, rtol=1e-14)
 
 
-def test_create_star_stellar_contam_rejected():
-    with pytest.raises(NotImplementedError, match="Stellar contamination"):
-        jpo.create_star(7e8, 5500, 4.4, 0.0, stellar_contam="one_spot")
+def test_create_star_stellar_contam_unknown_rejected():
+    """Unknown stellar_contam keys still raise; recognised ones are lifted."""
+    with pytest.raises(NotImplementedError, match="stellar_contam"):
+        jpo.create_star(7e8, 5500, 4.4, 0.0, stellar_contam="bogus_spot")
+
+
+def test_create_star_stellar_contam_one_spot_wires_I_het():
+    """v1-D: `stellar_contam='one_spot'` populates `I_het` from blackbody T_het."""
+    star = jpo.create_star(
+        7e8,
+        5500,
+        4.4,
+        0.0,
+        stellar_contam="one_spot",
+        f_het=0.1,
+        T_het=4500.0,
+    )
+    assert star["stellar_contam"] == "one_spot"
+    assert star["I_het"] is not None
+    assert star["I_phot"] is not None
+    assert star["I_het"].shape == star["I_phot"].shape
 
 
 def test_create_star_non_blackbody_rejected():

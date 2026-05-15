@@ -1,28 +1,32 @@
-"""Instrument convolution + binning.
+"""Instrument convolution + binning (v1-D JAX port).
 
 Mirrors `POSEIDON/POSEIDON/instrument.py:321-396` (`make_model_data`)
 and the multi-dataset wrapper at `:399-447` (`bin_spectrum_to_data`).
 
-Supports both spectroscopic and photometric instruments. Spectroscopic
-data require `(sigma, sensitivity, bin_left, bin_cent, bin_right, norm)`
-arrays; photometric data (IRAC1/IRAC2) skip the PSF convolution and use
-a sensitivity-weighted integral over the band. Per-bin metadata is
-prepared via `_instrument_setup.compute_instrument_indices(...)` /
-`compute_photometric_indices(...)`.
+Supports both spectroscopic and photometric instruments. The Gaussian
+PSF convolution uses ``_jax_filters.gaussian_filter1d_edge``; the
+trapezoidal integration uses ``jnp.trapezoid``. Per-bin metadata is
+prepared via ``_instrument_setup.compute_instrument_indices(...)``.
+
+When called from inside ``jax.jit``, ``sigma``, ``bin_left``, ``bin_cent``,
+``bin_right`` and ``norm`` must be Python sequences / numpy arrays of
+static values (the kernel sizes and gather indices are traced as static).
+``bin_spectrum_to_data`` therefore exposes the same ``data_properties``
+dict-of-numpy-arrays interface as the v0.5 numpy version; only
+``spectrum`` is a JAX tracer at retrieval time.
 """
 
+import jax
+import jax.numpy as jnp
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
-
-try:
-    from numpy import trapezoid as trapz
-except ImportError:
-    from numpy import trapz
 
 from jaxposeidon._instrument_setup import (
     PHOTOMETRIC_INSTRUMENTS,
     compute_instrument_indices,  # noqa: F401
 )
+from jaxposeidon._jax_filters import gaussian_filter1d_edge
+
+jax.config.update("jax_enable_x64", True)
 
 
 def make_model_data(
@@ -39,58 +43,64 @@ def make_model_data(
     """Bin a fine-grid spectrum to data wavelengths via PSF convolution +
     sensitivity-weighted integration.
 
-    Bit-exact port of POSEIDON `instrument.py:321-396`.
+    Bit-exact port of POSEIDON `instrument.py:321-396`. The setup-time
+    metadata (``sigma``, ``bin_left``, ``bin_right``, ``sensitivity``,
+    ``norm``) is consumed as numpy at trace time; only ``spectrum`` is
+    a JAX tracer under ``jit``.
     """
+    spectrum = jnp.asarray(spectrum, dtype=jnp.float64)
+    wl = jnp.asarray(wl, dtype=jnp.float64)
+    sensitivity = jnp.asarray(sensitivity, dtype=jnp.float64)
+
     if photometric:
         integrand = (
             spectrum[bin_left[0] : bin_right[0]]
             * sensitivity[bin_left[0] : bin_right[0]]
         )
-        data = trapz(integrand, wl[bin_left[0] : bin_right[0]])
-        return np.atleast_1d(data / norm)
+        data = jnp.trapezoid(integrand, wl[bin_left[0] : bin_right[0]])
+        return jnp.atleast_1d(data / norm)
+
+    sigma = np.asarray(sigma)
+    bin_left = np.asarray(bin_left)
+    bin_cent = np.asarray(bin_cent)
+    bin_right = np.asarray(bin_right)
+    norm = np.asarray(norm)
 
     N_bins = len(bin_cent)
-    data = np.zeros(N_bins)
-    ymodel = np.zeros(N_bins)
+    ymodel_list = []
     for n in range(N_bins):
-        extension = max(1, int(2 * sigma[n]))
-        slice_lo = bin_left[n] - extension
-        slice_hi = bin_right[n] + extension
-        spectrum_conv = gaussian_filter1d(
-            spectrum[slice_lo:slice_hi], sigma=sigma[n], mode="nearest"
+        extension = int(max(1, int(2 * sigma[n])))
+        slice_lo = int(bin_left[n] - extension)
+        slice_hi = int(bin_right[n] + extension)
+        spectrum_conv = gaussian_filter1d_edge(
+            spectrum[slice_lo:slice_hi], sigma=float(sigma[n])
         )
-        if len(spectrum_conv[extension:-extension]) != len(
-            sensitivity[bin_left[n] : bin_right[n]]
-        ):
+        conv_trim = spectrum_conv[extension : spectrum_conv.shape[0] - extension]
+        if conv_trim.shape[0] != int(bin_right[n] - bin_left[n]):
             raise Exception(
                 "Error: Model wavelength range not wide enough to encompass all data."
             )
-        integrand = (
-            spectrum_conv[extension:-extension]
-            * sensitivity[bin_left[n] : bin_right[n]]
-        )
-        data[n] = trapz(integrand, wl[bin_left[n] : bin_right[n]])
-        ymodel[n] = data[n] / norm[n]
-    return ymodel
+        integrand = conv_trim * sensitivity[int(bin_left[n]) : int(bin_right[n])]
+        bin_val = jnp.trapezoid(integrand, wl[int(bin_left[n]) : int(bin_right[n])])
+        ymodel_list.append(bin_val / float(norm[n]))
+    return jnp.stack(ymodel_list)
 
 
 def bin_spectrum_to_data(spectrum, wl, data_properties):
     """Multi-instrument spectroscopic wrapper around `make_model_data(...)`.
 
-    Mirrors POSEIDON `instrument.py:399-447` for the spectroscopic case
-    only. Photometric datasets (IRAC1, IRAC2) raise NotImplementedError.
-
-    `data_properties` is the dict POSEIDON's `load_data(...)` returns,
-    with keys:
-        datasets, instruments, psf_sigma, sens, bin_left, bin_cent,
-        bin_right, norm, len_data_idx.
+    Mirrors POSEIDON `instrument.py:399-447`. ``data_properties`` is the
+    setup-time numpy dict from ``load_data(...)``; ``spectrum`` (and ``wl``)
+    may be JAX tracers.
     """
-    ymodel = np.array([])
-    N_wl = len(wl)
+    N_wl = int(np.asarray(wl).shape[0])
+    pieces = []
+    instruments = data_properties["instruments"]
+    len_data_idx = np.asarray(data_properties["len_data_idx"])
     for i in range(len(data_properties["datasets"])):
-        instrument = data_properties["instruments"][i]
-        idx_1 = data_properties["len_data_idx"][i]
-        idx_2 = data_properties["len_data_idx"][i + 1]
+        instrument = instruments[i]
+        idx_1 = int(len_data_idx[i])
+        idx_2 = int(len_data_idx[i + 1])
         ymodel_i = make_model_data(
             spectrum,
             wl,
@@ -102,5 +112,5 @@ def bin_spectrum_to_data(spectrum, wl, data_properties):
             data_properties["norm"][idx_1:idx_2],
             photometric=(instrument in PHOTOMETRIC_INSTRUMENTS),
         )
-        ymodel = np.concatenate([ymodel, ymodel_i])
-    return ymodel
+        pieces.append(jnp.atleast_1d(ymodel_i))
+    return jnp.concatenate(pieces)

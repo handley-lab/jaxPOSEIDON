@@ -47,7 +47,7 @@ def test_make_model_data_matches_poseidon():
         norm,
         photometric=False,
     )
-    np.testing.assert_allclose(ours, theirs, atol=0, rtol=0)
+    np.testing.assert_allclose(np.asarray(ours), theirs, atol=0, rtol=1e-13)
 
 
 def test_make_model_data_photometric_band_integral():
@@ -232,7 +232,7 @@ def test_bin_spectrum_to_data_matches_poseidon():
     }
     ours = _instruments.bin_spectrum_to_data(spectrum, wl, data_properties)
     theirs = p_bs(spectrum, wl, data_properties)
-    np.testing.assert_allclose(ours, theirs, atol=0, rtol=0)
+    np.testing.assert_allclose(np.asarray(ours), theirs, atol=0, rtol=1e-13)
 
 
 def test_bin_spectrum_to_data_photometric_single_band():

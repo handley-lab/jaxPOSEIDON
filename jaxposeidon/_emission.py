@@ -1,4 +1,4 @@
-"""Thermal-emission + reflection forward model.
+"""Thermal-emission + reflection forward model (v1-D JAX port).
 
 Ports POSEIDON `emission.py:30-1609`:
 - planck_lambda_arr        — black-body spectral radiance
@@ -10,57 +10,92 @@ Ports POSEIDON `emission.py:30-1609`:
 - reflection_Toon          — Toon multi-stream reflected light
 - emission_bare_surface    — bare-rock thermal F = π · B · (1 - r_surf)
 - reflection_bare_surface  — bare-rock reflected with 5-pt Gauss disk integral
+
+v1-D conversion: numpy operations replaced with `jnp` so the hot path is
+jax-traceable. Thomas tridiagonal sweep uses `lax.scan`. Python-level
+shape constants (N_layer, N_wl, Gauss_quad) are treated as static under
+`jit`.
 """
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 import scipy.constants as sc
+from jax import lax
+
+jax.config.update("jax_enable_x64", True)
+
+_H = float(sc.h)
+_C = float(sc.c)
+_K = float(sc.k)
 
 
 def planck_lambda_arr(T, wl):
     """Black-body spectral radiance B(T, λ) in SI (W/m²/sr/m).
 
-    Bit-equivalent port of POSEIDON `emission.py:30-69`.
+    Bit-equivalent port of POSEIDON `emission.py:30-69`. Returns a
+    (len(T), len(wl)) array.
     """
-    B_lambda = np.zeros(shape=(len(T), len(wl)))
+    T = jnp.asarray(T, dtype=jnp.float64)
+    wl = jnp.asarray(wl, dtype=jnp.float64)
     wl_m = wl * 1.0e-6
-    c_2 = (sc.h * sc.c) / sc.k
-    for k in range(len(wl)):
-        coeff = (2.0 * sc.h * sc.c**2) / (wl_m[k] ** 5)
-        for i in range(len(T)):
-            B_lambda[i, k] = coeff * (1.0 / (np.exp(c_2 / (wl_m[k] * T[i])) - 1.0))
-    return B_lambda
+    c_2 = (_H * _C) / _K
+    coeff = (2.0 * _H * _C**2) / (wl_m**5)
+    denom = jnp.exp(c_2 / (wl_m[None, :] * T[:, None])) - 1.0
+    return coeff[None, :] / denom
 
 
 def emission_single_stream(T, dz, wl, kappa, Gauss_quad=2):
     """Pure thermal emission with no scattering (Gauss-quadrature solver).
 
     Bit-equivalent port of POSEIDON `emission.py:111-178`. Returns
-    `(F, dtau)` where `F` is the top-of-atmosphere surface flux (W/m²/sr/m)
-    and `dtau` is the per-layer vertical optical depth.
+    `(F, dtau)`.
     """
+    W, mu = _gauss_quad(Gauss_quad)
+    return _emission_single_stream_inner(T, dz, wl, kappa, W, mu)
+
+
+def _gauss_quad(Gauss_quad):
     if Gauss_quad == 2:
-        W = np.array([0.5, 0.5])
-        mu = np.array([0.5 - 0.5 * np.sqrt(1.0 / 3.0), 0.5 + 0.5 * np.sqrt(1.0 / 3.0)])
-    elif Gauss_quad == 3:
-        W = np.array([5.0 / 18.0, 4.0 / 9.0, 5.0 / 18.0])
-        mu = np.array(
-            [0.5 - 0.5 * np.sqrt(3.0 / 5.0), 0.5, 0.5 + 0.5 * np.sqrt(3.0 / 5.0)]
+        W = jnp.array([0.5, 0.5])
+        mu = jnp.array(
+            [0.5 - 0.5 * jnp.sqrt(1.0 / 3.0), 0.5 + 0.5 * jnp.sqrt(1.0 / 3.0)]
         )
+    elif Gauss_quad == 3:
+        W = jnp.array([5.0 / 18.0, 4.0 / 9.0, 5.0 / 18.0])
+        mu = jnp.array(
+            [
+                0.5 - 0.5 * jnp.sqrt(3.0 / 5.0),
+                0.5,
+                0.5 + 0.5 * jnp.sqrt(3.0 / 5.0),
+            ]
+        )
+    else:
+        raise ValueError(f"Gauss_quad={Gauss_quad!r} not supported")
+    return W, mu
+
+
+def _emission_single_stream_inner(T, dz, wl, kappa, W, mu):
+    T = jnp.asarray(T, dtype=jnp.float64)
+    dz = jnp.asarray(dz, dtype=jnp.float64)
+    wl = jnp.asarray(wl, dtype=jnp.float64)
+    kappa = jnp.asarray(kappa, dtype=jnp.float64)
 
     B = planck_lambda_arr(T, wl)
-    I = np.ones(shape=(len(mu), len(wl))) * B[0, :]
-    F = np.zeros(len(wl))
-    dtau = np.zeros(shape=(len(T), len(wl)))
+    N_T = T.shape[0]
+    N_wl = wl.shape[0]
+    N_mu = mu.shape[0]
 
-    for k in range(len(wl)):
-        for j in range(len(mu)):
-            for i in range(len(T)):
-                dtau_vert = kappa[i, k] * dz[i]
-                dtau[i, k] = dtau_vert
-                Trans = np.exp((-1.0 * dtau_vert) / mu[j])
-                I[j, k] = Trans * I[j, k] + (1.0 - Trans) * B[i, k]
-            F[k] += 2.0 * np.pi * mu[j] * I[j, k] * W[j]
+    dtau = kappa * dz[:, None]
+    I0 = jnp.broadcast_to(B[0, :], (N_mu, N_wl))
 
+    def scan_layer(I, i):
+        Trans = jnp.exp(-dtau[i, :][None, :] / mu[:, None])
+        I_new = Trans * I + (1.0 - Trans) * B[i, :][None, :]
+        return I_new, None
+
+    I_final, _ = lax.scan(scan_layer, I0, jnp.arange(N_T))
+    F = jnp.sum(2.0 * jnp.pi * mu[:, None] * I_final * W[:, None], axis=0)
     return F, dtau
 
 
@@ -69,10 +104,13 @@ def emission_bare_surface(T_surf, wl, surf_reflect):
 
     Bit-equivalent port of POSEIDON `emission.py:1576-1609`.
     """
-    T = np.array([T_surf])
+    T_surf = jnp.asarray(T_surf, dtype=jnp.float64)
+    wl = jnp.asarray(wl, dtype=jnp.float64)
+    surf_reflect = jnp.asarray(surf_reflect, dtype=jnp.float64)
+    T = jnp.atleast_1d(T_surf)
     B = planck_lambda_arr(T, wl)
     emissivity = 1.0 - surf_reflect
-    return B[0, :] * emissivity * np.pi
+    return B[0, :] * emissivity * jnp.pi
 
 
 def emission_single_stream_w_albedo(
@@ -88,55 +126,59 @@ def emission_single_stream_w_albedo(
 
     Bit-equivalent port of POSEIDON `emission.py:181-261`.
     """
-    if Gauss_quad == 2:
-        W = np.array([0.5, 0.5])
-        mu = np.array([0.5 - 0.5 * np.sqrt(1.0 / 3.0), 0.5 + 0.5 * np.sqrt(1.0 / 3.0)])
-    elif Gauss_quad == 3:
-        W = np.array([5.0 / 18.0, 4.0 / 9.0, 5.0 / 18.0])
-        mu = np.array(
-            [0.5 - 0.5 * np.sqrt(3.0 / 5.0), 0.5, 0.5 + 0.5 * np.sqrt(3.0 / 5.0)]
-        )
+    T = jnp.asarray(T, dtype=jnp.float64)
+    dz = jnp.asarray(dz, dtype=jnp.float64)
+    wl = jnp.asarray(wl, dtype=jnp.float64)
+    kappa = jnp.asarray(kappa, dtype=jnp.float64)
+    W, mu = _gauss_quad(Gauss_quad)
 
     if surf_reflect is None:
-        surf_reflect = np.zeros(len(wl))
+        surf_reflect = jnp.zeros(wl.shape[0])
+    surf_reflect = jnp.asarray(surf_reflect, dtype=jnp.float64)
     emissivity = 1.0 - surf_reflect
     B = planck_lambda_arr(T, wl)
-    B[index_below_P_surf, :] = B[index_below_P_surf, :] * emissivity
+    B = B.at[index_below_P_surf, :].set(B[index_below_P_surf, :] * emissivity)
 
-    I = np.ones(shape=(len(mu), len(wl))) * B[0, :]
-    F = np.zeros(len(wl))
-    dtau = np.zeros(shape=(len(T), len(wl)))
+    N_T = T.shape[0]
+    N_wl = wl.shape[0]
+    N_mu = mu.shape[0]
 
-    for k in range(len(wl)):
-        for j in range(len(mu)):
-            for i in range(len(T)):
-                dtau_vert = kappa[i, k] * dz[i]
-                dtau[i, k] = dtau_vert
-                Trans = np.exp((-1.0 * dtau_vert) / mu[j])
-                I[j, k] = Trans * I[j, k] + (1.0 - Trans) * B[i, k]
-            F[k] += 2.0 * np.pi * mu[j] * I[j, k] * W[j]
+    dtau = kappa * dz[:, None]
+    I0 = jnp.broadcast_to(B[0, :], (N_mu, N_wl))
+
+    def scan_layer(I, i):
+        Trans = jnp.exp(-dtau[i, :][None, :] / mu[:, None])
+        I_new = Trans * I + (1.0 - Trans) * B[i, :][None, :]
+        return I_new, None
+
+    I_final, _ = lax.scan(scan_layer, I0, jnp.arange(N_T))
+    F = jnp.sum(2.0 * jnp.pi * mu[:, None] * I_final * W[:, None], axis=0)
     return F, dtau
 
 
 def determine_photosphere_radii(dtau, r_low, wl, photosphere_tau=2 / 3):
     """Wavelength-dependent photosphere radii via τ-interpolation.
 
-    Bit-equivalent port of POSEIDON `emission.py:346-380`.
+    Bit-equivalent port of POSEIDON `emission.py:346-380`. Uses
+    `jnp.interp` per wavelength.
     """
-    R_p_eff = np.zeros(len(wl))
-    for k in range(len(wl)):
-        tau_lambda = np.cumsum(dtau[:, k])
-        R_p_eff[k] = np.interp(photosphere_tau, tau_lambda, r_low)
+    dtau = jnp.asarray(dtau, dtype=jnp.float64)
+    r_low = jnp.asarray(r_low, dtype=jnp.float64)
+    wl = jnp.asarray(wl, dtype=jnp.float64)
+    tau_cum = jnp.cumsum(dtau, axis=0)
+
+    # Vectorise jnp.interp over wavelength.
+    def one_wl(tau_lambda):
+        return jnp.interp(photosphere_tau, tau_lambda, r_low)
+
+    R_p_eff = jax.vmap(one_wl, in_axes=1)(tau_cum)
     return R_p_eff
 
 
 def slice_gt(array, lim):
     """Clip per-row values above `lim` (POSEIDON `emission.py:423-432`)."""
-    for i in range(array.shape[0]):
-        new = array[i, :]
-        new[np.where(new > lim)] = lim
-        array[i, :] = new
-    return array
+    array = jnp.asarray(array, dtype=jnp.float64)
+    return jnp.minimum(array, lim)
 
 
 def setup_tri_diag(
@@ -164,56 +206,99 @@ def setup_tri_diag(
     e3 = gamma * exptrm_positive + exptrm_minus
     e4 = gamma * exptrm_positive - exptrm_minus
 
-    A = np.zeros((L, N_wl))
-    B = np.zeros((L, N_wl))
-    C = np.zeros((L, N_wl))
-    D = np.zeros((L, N_wl))
+    A = jnp.zeros((L, N_wl))
+    B = jnp.zeros((L, N_wl))
+    C = jnp.zeros((L, N_wl))
+    D = jnp.zeros((L, N_wl))
 
-    A[0, :] = 0.0
-    B[0, :] = gamma[0, :] + 1.0
-    C[0, :] = gamma[0, :] - 1.0
-    D[0, :] = b_top - c_minus_up[0, :]
+    # Row 0.
+    A = A.at[0, :].set(0.0)
+    B = B.at[0, :].set(gamma[0, :] + 1.0)
+    C = C.at[0, :].set(gamma[0, :] - 1.0)
+    D = D.at[0, :].set(b_top - c_minus_up[0, :])
 
-    A[1::2, :][:-1] = (e1[:-1, :] + e3[:-1, :]) * (gamma[1:, :] - 1.0)
-    B[1::2, :][:-1] = (e2[:-1, :] + e4[:-1, :]) * (gamma[1:, :] - 1.0)
-    C[1::2, :][:-1] = 2.0 * (1.0 - gamma[1:, :] ** 2)
-    D[1::2, :][:-1] = (gamma[1:, :] - 1.0) * (
-        c_plus_up[1:, :] - c_plus_down[:-1, :]
-    ) + (1.0 - gamma[1:, :]) * (c_minus_down[:-1, :] - c_minus_up[1:, :])
+    # Odd rows 1..L-3 (i.e. A[1::2][:-1]).
+    odd_idx = jnp.arange(1, L - 1, 2)
+    A = A.at[odd_idx, :].set((e1[:-1, :] + e3[:-1, :]) * (gamma[1:, :] - 1.0))
+    B = B.at[odd_idx, :].set((e2[:-1, :] + e4[:-1, :]) * (gamma[1:, :] - 1.0))
+    C = C.at[odd_idx, :].set(2.0 * (1.0 - gamma[1:, :] ** 2))
+    D = D.at[odd_idx, :].set(
+        (gamma[1:, :] - 1.0) * (c_plus_up[1:, :] - c_plus_down[:-1, :])
+        + (1.0 - gamma[1:, :]) * (c_minus_down[:-1, :] - c_minus_up[1:, :])
+    )
 
-    A[::2, :][1:] = 2.0 * (1.0 - gamma[:-1, :] ** 2)
-    B[::2, :][1:] = (e1[:-1, :] - e3[:-1, :]) * (gamma[1:, :] + 1.0)
-    C[::2, :][1:] = (e1[:-1, :] + e3[:-1, :]) * (gamma[1:, :] - 1.0)
-    D[::2, :][1:] = e3[:-1, :] * (c_plus_up[1:, :] - c_plus_down[:-1, :]) + e1[
-        :-1, :
-    ] * (c_minus_down[:-1, :] - c_minus_up[1:, :])
+    # Even rows 2..L-2 (i.e. A[::2][1:]).
+    even_idx = jnp.arange(2, L, 2)
+    A = A.at[even_idx, :].set(2.0 * (1.0 - gamma[:-1, :] ** 2))
+    B = B.at[even_idx, :].set((e1[:-1, :] - e3[:-1, :]) * (gamma[1:, :] + 1.0))
+    C = C.at[even_idx, :].set((e1[:-1, :] + e3[:-1, :]) * (gamma[1:, :] - 1.0))
+    D = D.at[even_idx, :].set(
+        e3[:-1, :] * (c_plus_up[1:, :] - c_plus_down[:-1, :])
+        + e1[:-1, :] * (c_minus_down[:-1, :] - c_minus_up[1:, :])
+    )
 
-    A[-1, :] = e1[-1, :] - surf_reflect * e3[-1, :]
-    B[-1, :] = e2[-1, :] - surf_reflect * e4[-1, :]
-    C[-1, :] = 0.0
-    D[-1, :] = b_surface - c_plus_down[-1, :] + surf_reflect * c_minus_down[-1, :]
+    # Last row (L-1).
+    A = A.at[L - 1, :].set(e1[-1, :] - surf_reflect * e3[-1, :])
+    B = B.at[L - 1, :].set(e2[-1, :] - surf_reflect * e4[-1, :])
+    C = C.at[L - 1, :].set(0.0)
+    D = D.at[L - 1, :].set(
+        b_surface - c_plus_down[-1, :] + surf_reflect * c_minus_down[-1, :]
+    )
 
     return A, B, C, D
+
+
+def _tri_diag_solve_scan(a, b, c, d):
+    """Vectorised Thomas via two `lax.scan` sweeps.
+
+    Single-wavelength formulation in POSEIDON `emission.py:534-569`. Each
+    of `a, b, c, d` has shape `(L,)`; this routine returns `XK` of shape
+    `(L,)`. For multi-wavelength batched solve, vmap over the trailing
+    axis.
+    """
+    L = a.shape[0]
+    AS_last = a[-1] / b[-1]
+    DS_last = d[-1] / b[-1]
+
+    # Backward sweep i = L-2 ... 0, carry (AS_prev, DS_prev).
+    def backward_step(carry, idx):
+        AS_next, DS_next = carry
+        i = L - 2 - idx
+        x = 1.0 / (b[i] - c[i] * AS_next)
+        AS_i = a[i] * x
+        DS_i = (d[i] - c[i] * DS_next) * x
+        return (AS_i, DS_i), (AS_i, DS_i)
+
+    (_, _), (AS_rev, DS_rev) = lax.scan(
+        backward_step, (AS_last, DS_last), jnp.arange(L - 1)
+    )
+    # AS_rev[k] corresponds to i = L-2-k. Reverse to forward order:
+    AS = jnp.concatenate([AS_rev[::-1], jnp.array([AS_last])])
+    DS = jnp.concatenate([DS_rev[::-1], jnp.array([DS_last])])
+
+    # Forward sweep i = 1..L-1, carry XK_{i-1}.
+    XK_0 = DS[0]
+
+    def forward_step(XK_prev, i):
+        XK_i = DS[i] - AS[i] * XK_prev
+        return XK_i, XK_i
+
+    _, XK_rest = lax.scan(forward_step, XK_0, jnp.arange(1, L))
+    XK = jnp.concatenate([jnp.array([XK_0]), XK_rest])
+    return XK
 
 
 def tri_diag_solve(l, a, b, c, d):
     """Tridiagonal Thomas-algorithm solve A·X = D for a single wavelength.
 
-    Bit-equivalent port of POSEIDON `emission.py:534-569`.
+    Bit-equivalent port of POSEIDON `emission.py:534-569`. Uses `lax.scan`
+    for the two sequential sweeps so the kernel is jit-traceable.
     """
-    AS = np.zeros(l)
-    DS = np.zeros(l)
-    XK = np.zeros(l)
-    AS[-1] = a[-1] / b[-1]
-    DS[-1] = d[-1] / b[-1]
-    for i in range(l - 2, -1, -1):
-        x = 1.0 / (b[i] - c[i] * AS[i + 1])
-        AS[i] = a[i] * x
-        DS[i] = (d[i] - c[i] * DS[i + 1]) * x
-    XK[0] = DS[0]
-    for i in range(1, l):
-        XK[i] = DS[i] - AS[i] * XK[i - 1]
-    return XK
+    a = jnp.asarray(a, dtype=jnp.float64)
+    b = jnp.asarray(b, dtype=jnp.float64)
+    c = jnp.asarray(c, dtype=jnp.float64)
+    d = jnp.asarray(d, dtype=jnp.float64)
+    return _tri_diag_solve_scan(a, b, c, d)
 
 
 def numba_cumsum(mat):
@@ -221,10 +306,7 @@ def numba_cumsum(mat):
 
     Bit-equivalent port of POSEIDON `emission.py:966-973`.
     """
-    new_mat = np.zeros(mat.shape)
-    for i in range(mat.shape[1]):
-        new_mat[:, i] = np.cumsum(mat[:, i])
-    return new_mat
+    return jnp.cumsum(jnp.asarray(mat, dtype=jnp.float64), axis=0)
 
 
 def emission_Toon(
@@ -251,22 +333,42 @@ def emission_Toon(
     Bit-equivalent port of POSEIDON `emission.py:573-963`. PICASO source-
     function method with Toon+89 quadrature. Hemispheric mean (μ₁=0.5).
     """
-    kappa_cloud_w_cloud_sum = np.zeros_like(kappa_cloud)
-    kappa_cloud_w_cloud_g_cloud_sum = np.zeros_like(kappa_cloud)
+    P = jnp.asarray(P, dtype=jnp.float64)
+    T = jnp.asarray(T, dtype=jnp.float64)
+    wl = jnp.asarray(wl, dtype=jnp.float64)
+    dtau_tot = jnp.asarray(dtau_tot, dtype=jnp.float64)
+    kappa_Ray = jnp.asarray(kappa_Ray, dtype=jnp.float64)
+    kappa_cloud = jnp.asarray(kappa_cloud, dtype=jnp.float64)
+    kappa_tot = jnp.asarray(kappa_tot, dtype=jnp.float64)
+    w_cloud = jnp.asarray(w_cloud, dtype=jnp.float64)
+    g_cloud = jnp.asarray(g_cloud, dtype=jnp.float64)
+    surf_reflect = jnp.asarray(surf_reflect, dtype=jnp.float64)
+    kappa_cloud_seperate = jnp.asarray(kappa_cloud_seperate, dtype=jnp.float64)
 
-    for aerosol in range(len(kappa_cloud_seperate)):
-        w_cloud[aerosol, :, 0, zone_idx, :] = (
-            w_cloud[aerosol, :, 0, zone_idx, :] * 0.99999
+    n_aerosol = kappa_cloud_seperate.shape[0]
+
+    def loop_aerosol(carry, k):
+        w_cloud_, kcws, kcwgs = carry
+        w_cloud_ = w_cloud_.at[k, :, 0, zone_idx, :].set(
+            w_cloud_[k, :, 0, zone_idx, :] * 0.99999
         )
-        kappa_cloud_w_cloud_sum[:, 0, zone_idx, :] += (
-            kappa_cloud_seperate[aerosol, :, 0, zone_idx, :]
-            * w_cloud[aerosol, :, 0, zone_idx, :]
+        kcws = kcws.at[:, 0, zone_idx, :].add(
+            kappa_cloud_seperate[k, :, 0, zone_idx, :] * w_cloud_[k, :, 0, zone_idx, :]
         )
-        kappa_cloud_w_cloud_g_cloud_sum[:, 0, zone_idx, :] += (
-            kappa_cloud_seperate[aerosol, :, 0, zone_idx, :]
-            * w_cloud[aerosol, :, 0, zone_idx, :]
-            * g_cloud[aerosol, :, 0, zone_idx, :]
+        kcwgs = kcwgs.at[:, 0, zone_idx, :].add(
+            kappa_cloud_seperate[k, :, 0, zone_idx, :]
+            * w_cloud_[k, :, 0, zone_idx, :]
+            * g_cloud[k, :, 0, zone_idx, :]
         )
+        return (w_cloud_, kcws, kcwgs), None
+
+    kappa_cloud_w_cloud_sum = jnp.zeros_like(kappa_cloud)
+    kappa_cloud_w_cloud_g_cloud_sum = jnp.zeros_like(kappa_cloud)
+    (w_cloud, kappa_cloud_w_cloud_sum, kappa_cloud_w_cloud_g_cloud_sum), _ = lax.scan(
+        loop_aerosol,
+        (w_cloud, kappa_cloud_w_cloud_sum, kappa_cloud_w_cloud_g_cloud_sum),
+        jnp.arange(n_aerosol),
+    )
 
     w_tot = (
         (0.99999 * kappa_Ray[:, 0, zone_idx, :])
@@ -277,43 +379,40 @@ def emission_Toon(
         + (0.99999 * kappa_Ray[:, 0, zone_idx, :])
     )
 
-    P = np.flipud(P)
-    T = np.flipud(T)
-    dtau_tot = np.flipud(dtau_tot)
-    w_tot = np.flipud(w_tot)
-    g_tot = np.flipud(g_tot)
+    P = jnp.flipud(P)
+    T = jnp.flipud(T)
+    dtau_tot = jnp.flipud(dtau_tot)
+    w_tot = jnp.flipud(w_tot)
+    g_tot = jnp.flipud(g_tot)
 
-    N_wl = len(wl)
-    N_layer = len(P)
+    N_wl = wl.shape[0]
+    N_layer = P.shape[0]
     N_level = N_layer + 1
 
-    T_level = np.zeros(N_level)
-    log_P_level = np.zeros(N_level)
-    T_level[1:-1] = (T[1:] + T[:-1]) / 2.0
-    T_level[0] = T_level[1] - (T_level[2] - T_level[1])
-    T_level[-1] = T_level[-2] + (T_level[-2] - T_level[-3])
+    T_level = jnp.zeros(N_level)
+    log_P_level = jnp.zeros(N_level)
+    T_level = T_level.at[1:-1].set((T[1:] + T[:-1]) / 2.0)
+    T_level = T_level.at[0].set(T_level[1] - (T_level[2] - T_level[1]))
+    T_level = T_level.at[-1].set(T_level[-2] + (T_level[-2] - T_level[-3]))
 
-    log_P = np.log10(P)
-    log_P_level[1:-1] = (log_P[1:] + log_P[:-1]) / 2.0
-    log_P_level[0] = log_P_level[1] - (log_P_level[2] - log_P_level[1])
-    log_P_level[-1] = log_P_level[-2] + (log_P_level[-2] - log_P_level[-3])
-    P_level = np.power(10.0, log_P_level)
+    log_P = jnp.log10(P)
+    log_P_level = log_P_level.at[1:-1].set((log_P[1:] + log_P[:-1]) / 2.0)
+    log_P_level = log_P_level.at[0].set(
+        log_P_level[1] - (log_P_level[2] - log_P_level[1])
+    )
+    log_P_level = log_P_level.at[-1].set(
+        log_P_level[-2] + (log_P_level[-2] - log_P_level[-3])
+    )
+    P_level = jnp.power(10.0, log_P_level)
 
-    gangle = np.array(
+    gangle = jnp.array(
         [0.0985350858, 0.3045357266, 0.5620251898, 0.8019865821, 0.9601901429]
     )
-    gweight = np.array(
+    gweight = jnp.array(
         [0.0157479145, 0.0739088701, 0.1463869871, 0.1671746381, 0.0967815902]
     )
 
     cos_theta = 1.0
-    longitude = np.arcsin(
-        (gangle - (cos_theta - 1.0) / (cos_theta + 1.0)) / (2.0 / (cos_theta + 1))
-    )
-    colatitude = np.arccos(0.0)
-    f = np.sin(colatitude)
-    ubar1 = np.outer(np.cos(longitude), f)  # noqa: F841
-
     mu1 = 0.5
     all_b = planck_lambda_arr(T_level, wl)
     b0 = all_b[0:-1, :]
@@ -321,30 +420,29 @@ def emission_Toon(
 
     g1 = 2.0 - (w_tot * (1 + g_tot))
     g2 = w_tot * (1 - g_tot)
-    alpha = np.sqrt((1.0 - w_tot) / (1.0 - (w_tot * g_tot)))  # noqa: F841
-    lamda = np.sqrt(g1**2 - g2**2)
+    lamda = jnp.sqrt(g1**2 - g2**2)
     gamma = (g1 - lamda) / g2
     g1_plus_g2 = 1.0 / (g1 + g2)
 
-    c_plus_up = 2 * np.pi * mu1 * (b0 + b1 * g1_plus_g2)
-    c_minus_up = 2 * np.pi * mu1 * (b0 - b1 * g1_plus_g2)
-    c_plus_down = 2 * np.pi * mu1 * (b0 + b1 * dtau_tot + b1 * g1_plus_g2)
-    c_minus_down = 2 * np.pi * mu1 * (b0 + b1 * dtau_tot - b1 * g1_plus_g2)
+    c_plus_up = 2 * jnp.pi * mu1 * (b0 + b1 * g1_plus_g2)
+    c_minus_up = 2 * jnp.pi * mu1 * (b0 - b1 * g1_plus_g2)
+    c_plus_down = 2 * jnp.pi * mu1 * (b0 + b1 * dtau_tot + b1 * g1_plus_g2)
+    c_minus_down = 2 * jnp.pi * mu1 * (b0 + b1 * dtau_tot - b1 * g1_plus_g2)
 
     exptrm = lamda * dtau_tot
     exptrm = slice_gt(exptrm, 35.0)
-    exptrm_positive = np.exp(exptrm)
+    exptrm_positive = jnp.exp(exptrm)
     exptrm_minus = 1.0 / exptrm_positive
 
     tau_top = dtau_tot[0, :] * P_level[0] / (P_level[1] - P_level[0])
-    b_top = (1.0 - np.exp(-tau_top / mu1)) * all_b[0, :] * np.pi
+    b_top = (1.0 - jnp.exp(-tau_top / mu1)) * all_b[0, :] * jnp.pi
     if hard_surface:
         emissivity = 1.0 - surf_reflect
-        b_surface = emissivity * all_b[-1, :] * np.pi
+        b_surface = emissivity * all_b[-1, :] * jnp.pi
     else:
-        b_surface = (all_b[-1, :] + b1[-1, :] * mu1) * np.pi
+        b_surface = (all_b[-1, :] + b1[-1, :] * mu1) * jnp.pi
 
-    A, B, C, D = setup_tri_diag(
+    A, Bm, Cm, Dm = setup_tri_diag(
         N_layer,
         N_wl,
         c_plus_up,
@@ -359,91 +457,83 @@ def emission_Toon(
         exptrm_positive,
         exptrm_minus,
     )
-    positive = np.zeros((N_layer, N_wl))
-    negative = np.zeros((N_layer, N_wl))
-    L = N_layer + N_layer
-    for w in range(N_wl):
-        X = tri_diag_solve(L, A[:, w], B[:, w], C[:, w], D[:, w])
-        positive[:, w] = X[::2] + X[1::2]
-        negative[:, w] = X[::2] - X[1::2]
-
-    f_up = positive * exptrm_positive + gamma * negative * exptrm_minus + c_plus_up  # noqa: F841
+    # Vectorised solve over wavelengths.
+    X_all = jax.vmap(_tri_diag_solve_scan, in_axes=(1, 1, 1, 1))(
+        A, Bm, Cm, Dm
+    )  # (N_wl, L)
+    X_all = X_all.T  # (L, N_wl)
+    positive = X_all[::2, :] + X_all[1::2, :]
+    negative = X_all[::2, :] - X_all[1::2, :]
 
     G = (1 / mu1 - lamda) * positive
     H = gamma * (lamda + 1 / mu1) * negative
-    J = gamma * (lamda + 1 / mu1) * positive  # noqa: F841
-    K = (1 / mu1 - lamda) * negative  # noqa: F841
-    alpha1 = 2 * np.pi * (b0 + b1 * (g1_plus_g2 - mu1))
-    alpha2 = 2 * np.pi * b1
-    sigma1 = 2 * np.pi * (b0 - b1 * (g1_plus_g2 - mu1))  # noqa: F841
-    sigma2 = 2 * np.pi * b1  # noqa: F841
+    alpha1 = 2 * jnp.pi * (b0 + b1 * (g1_plus_g2 - mu1))
+    alpha2 = 2 * jnp.pi * b1
 
-    int_minus = np.zeros((N_level, N_wl))
-    int_plus = np.zeros((N_level, N_wl))
-    int_minus_mdpt = np.zeros((N_level, N_wl))  # noqa: F841
-    int_plus_mdpt = np.zeros((N_level, N_wl))
-
-    exptrm_positive_mdpt = np.exp(0.5 * exptrm)
+    exptrm_positive_mdpt = jnp.exp(0.5 * exptrm)
     exptrm_minus_mdpt = 1 / exptrm_positive_mdpt
 
-    int_at_top = np.zeros((Gauss_quad, numt, N_wl))
-    int_down = np.zeros((Gauss_quad, numt, N_wl))  # noqa: F841
+    int_at_top = jnp.zeros((Gauss_quad, numt, N_wl))
 
-    F = np.zeros(N_wl)
+    def one_angle(ng, nt, iubar, int_at_top):
+        if hard_surface:
+            emissivity = 1.0 - surf_reflect
+            int_plus_last = emissivity * all_b[-1, :] * 2 * jnp.pi
+        else:
+            int_plus_last = (all_b[-1, :] + b1[-1, :] * iubar) * 2 * jnp.pi
+
+        exptrm_angle = jnp.exp(-dtau_tot / iubar)
+        exptrm_angle_mdpt = jnp.exp(-0.5 * dtau_tot / iubar)
+
+        # Sweep from bottom to top: ibot = N_layer-1 .. 0
+        def body(int_plus_prev, itop):
+            ibot = N_layer - 1 - itop
+            int_plus_new = (
+                int_plus_prev * exptrm_angle[ibot, :]
+                + (G[ibot, :] / (lamda[ibot, :] * iubar - 1.0))
+                * (exptrm_positive[ibot, :] * exptrm_angle[ibot, :] - 1.0)
+                + (H[ibot, :] / (lamda[ibot, :] * iubar + 1.0))
+                * (1.0 - exptrm_minus[ibot, :] * exptrm_angle[ibot, :])
+                + alpha1[ibot, :] * (1.0 - exptrm_angle[ibot, :])
+                + alpha2[ibot, :]
+                * (iubar - (dtau_tot[ibot, :] + iubar) * exptrm_angle[ibot, :])
+            )
+            int_plus_mdpt_new = (
+                int_plus_prev * exptrm_angle_mdpt[ibot, :]
+                + (G[ibot, :] / (lamda[ibot, :] * iubar - 1.0))
+                * (
+                    exptrm_positive[ibot, :] * exptrm_angle_mdpt[ibot, :]
+                    - exptrm_positive_mdpt[ibot, :]
+                )
+                - (H[ibot, :] / (lamda[ibot, :] * iubar + 1.0))
+                * (
+                    exptrm_minus[ibot, :] * exptrm_angle_mdpt[ibot, :]
+                    - exptrm_minus_mdpt[ibot, :]
+                )
+                + alpha1[ibot, :] * (1.0 - exptrm_angle_mdpt[ibot, :])
+                + alpha2[ibot, :]
+                * (
+                    iubar
+                    + 0.5 * dtau_tot[ibot, :]
+                    - (dtau_tot[ibot, :] + iubar) * exptrm_angle_mdpt[ibot, :]
+                )
+            )
+            return int_plus_new, int_plus_mdpt_new
+
+        # Use lax.scan accumulating int_plus_mdpt; ibot iteration from N_layer-1 down to 0
+        _, int_plus_mdpt_stack = lax.scan(body, int_plus_last, jnp.arange(N_layer))
+        # int_plus_mdpt_stack[itop=0] corresponds to ibot=N_layer-1 (deepest);
+        # we want int_plus_mdpt[0, :] which is the top layer, i.e. ibot=0,
+        # i.e. itop=N_layer-1. So:
+        top_val = int_plus_mdpt_stack[N_layer - 1]
+        return int_at_top.at[ng, nt, :].set(top_val)
 
     for ng in range(Gauss_quad):
         for nt in range(numt):
             iubar = gangle[ng]
-            if hard_surface:
-                emissivity = 1.0 - surf_reflect
-                int_plus[-1, :] = emissivity * all_b[-1, :] * 2 * np.pi
-            else:
-                int_plus[-1, :] = (all_b[-1, :] + b1[-1, :] * iubar) * 2 * np.pi
+            int_at_top = one_angle(ng, nt, iubar, int_at_top)
 
-            int_minus[0, :] = (1 - np.exp(-tau_top / iubar)) * all_b[0, :] * 2 * np.pi
-
-            exptrm_angle = np.exp(-dtau_tot / iubar)
-            exptrm_angle_mdpt = np.exp(-0.5 * dtau_tot / iubar)
-
-            for itop in range(N_layer):
-                ibot = N_layer - 1 - itop
-                int_plus[ibot, :] = (
-                    int_plus[ibot + 1, :] * exptrm_angle[ibot, :]
-                    + (G[ibot, :] / (lamda[ibot, :] * iubar - 1.0))
-                    * (exptrm_positive[ibot, :] * exptrm_angle[ibot, :] - 1.0)
-                    + (H[ibot, :] / (lamda[ibot, :] * iubar + 1.0))
-                    * (1.0 - exptrm_minus[ibot, :] * exptrm_angle[ibot, :])
-                    + alpha1[ibot, :] * (1.0 - exptrm_angle[ibot, :])
-                    + alpha2[ibot, :]
-                    * (iubar - (dtau_tot[ibot, :] + iubar) * exptrm_angle[ibot, :])
-                )
-
-                int_plus_mdpt[ibot, :] = (
-                    int_plus[ibot + 1, :] * exptrm_angle_mdpt[ibot, :]
-                    + (G[ibot, :] / (lamda[ibot, :] * iubar - 1.0))
-                    * (
-                        exptrm_positive[ibot, :] * exptrm_angle_mdpt[ibot, :]
-                        - exptrm_positive_mdpt[ibot, :]
-                    )
-                    - (H[ibot, :] / (lamda[ibot, :] * iubar + 1.0))
-                    * (
-                        exptrm_minus[ibot, :] * exptrm_angle_mdpt[ibot, :]
-                        - exptrm_minus_mdpt[ibot, :]
-                    )
-                    + alpha1[ibot, :] * (1.0 - exptrm_angle_mdpt[ibot, :])
-                    + alpha2[ibot, :]
-                    * (
-                        iubar
-                        + 0.5 * dtau_tot[ibot, :]
-                        - (dtau_tot[ibot, :] + iubar) * exptrm_angle_mdpt[ibot, :]
-                    )
-                )
-
-            int_at_top[ng, nt, :] = int_plus_mdpt[0, :]
-
-    for ng in range(Gauss_quad):
-        F += int_at_top[ng, 0, :] * gweight[ng]
-
+    F = jnp.sum(int_at_top[:, 0, :] * gweight[:, None], axis=0)
     return F, dtau_tot
 
 
@@ -474,46 +564,76 @@ def reflection_Toon(
 ):
     """Toon multi-stream reflected-light flux.
 
-    Bit-equivalent port of POSEIDON `emission.py:976-1573`. TTHG+Rayleigh
-    single-scattering phase function with quadrature Toon coefficients.
-
-    Note: `single_phase` is exposed for API parity with POSEIDON but is
-    inert — POSEIDON only retains the `single_phase==3` (TTHG_ray) branch
-    active; the other three branches (`0`/`'cahoy'`, `1`/`'OTHG'`,
-    `2`/`'TTHG'`) are commented out in POSEIDON's source.
+    Bit-equivalent port of POSEIDON `emission.py:976-1573`.
     """
-    N_wl = len(wl)
-    N_layer = len(P)
-    N_level = N_layer + 1  # noqa: F841
+    P = jnp.asarray(P, dtype=jnp.float64)
+    wl = jnp.asarray(wl, dtype=jnp.float64)
+    dtau_tot = jnp.asarray(dtau_tot, dtype=jnp.float64)
+    kappa_Ray = jnp.asarray(kappa_Ray, dtype=jnp.float64)
+    kappa_cloud = jnp.asarray(kappa_cloud, dtype=jnp.float64)
+    kappa_tot = jnp.asarray(kappa_tot, dtype=jnp.float64)
+    w_cloud = jnp.asarray(w_cloud, dtype=jnp.float64)
+    g_cloud = jnp.asarray(g_cloud, dtype=jnp.float64)
+    surf_reflect = jnp.asarray(surf_reflect, dtype=jnp.float64)
+    kappa_cloud_seperate = jnp.asarray(kappa_cloud_seperate, dtype=jnp.float64)
 
-    kappa_cloud_w_cloud_sum = np.zeros_like(kappa_cloud)
-    kappa_cloud_g_cloud_sum = np.zeros_like(kappa_cloud)
-    kappa_cloud_w_cloud_g_cloud_sum = np.zeros_like(kappa_cloud)
-    g_cloud_tot_weighted = np.zeros_like(kappa_cloud)
+    N_wl = wl.shape[0]
+    N_layer = P.shape[0]
 
-    for aerosol in range(len(kappa_cloud_seperate)):
-        w_cloud[aerosol, :, 0, zone_idx, :] = (
-            w_cloud[aerosol, :, 0, zone_idx, :] * 0.99999
-        )
-        kappa_cloud_w_cloud_sum[:, 0, zone_idx, :] += (
-            kappa_cloud_seperate[aerosol, :, 0, zone_idx, :]
-            * w_cloud[aerosol, :, 0, zone_idx, :]
-        )
-        kappa_cloud_g_cloud_sum[:, 0, zone_idx, :] += (
-            kappa_cloud_seperate[aerosol, :, 0, zone_idx, :]
-            * g_cloud[aerosol, :, 0, zone_idx, :]
-        )
-        kappa_cloud_w_cloud_g_cloud_sum[:, 0, zone_idx, :] += (
-            kappa_cloud_seperate[aerosol, :, 0, zone_idx, :]
-            * w_cloud[aerosol, :, 0, zone_idx, :]
-            * g_cloud[aerosol, :, 0, zone_idx, :]
-        )
-        g_cloud_tot_weighted[:, 0, zone_idx, :] += (
-            kappa_cloud_seperate[aerosol, :, 0, zone_idx, :]
-            / kappa_cloud[:, 0, zone_idx, :]
-        ) * g_cloud[aerosol, :, 0, zone_idx, :]
+    n_aerosol = kappa_cloud_seperate.shape[0]
 
-    np.nan_to_num(g_cloud_tot_weighted, copy=False, nan=0.0)
+    kappa_cloud_w_cloud_sum = jnp.zeros_like(kappa_cloud)
+    kappa_cloud_g_cloud_sum = jnp.zeros_like(kappa_cloud)
+    kappa_cloud_w_cloud_g_cloud_sum = jnp.zeros_like(kappa_cloud)
+    g_cloud_tot_weighted = jnp.zeros_like(kappa_cloud)
+
+    def aerosol_step(carry, k):
+        w_cloud_, kcws, kcgs, kcwgs, gctw = carry
+        w_cloud_ = w_cloud_.at[k, :, 0, zone_idx, :].set(
+            w_cloud_[k, :, 0, zone_idx, :] * 0.99999
+        )
+        kcws = kcws.at[:, 0, zone_idx, :].add(
+            kappa_cloud_seperate[k, :, 0, zone_idx, :] * w_cloud_[k, :, 0, zone_idx, :]
+        )
+        kcgs = kcgs.at[:, 0, zone_idx, :].add(
+            kappa_cloud_seperate[k, :, 0, zone_idx, :] * g_cloud[k, :, 0, zone_idx, :]
+        )
+        kcwgs = kcwgs.at[:, 0, zone_idx, :].add(
+            kappa_cloud_seperate[k, :, 0, zone_idx, :]
+            * w_cloud_[k, :, 0, zone_idx, :]
+            * g_cloud[k, :, 0, zone_idx, :]
+        )
+        gctw = gctw.at[:, 0, zone_idx, :].add(
+            (
+                kappa_cloud_seperate[k, :, 0, zone_idx, :]
+                / kappa_cloud[:, 0, zone_idx, :]
+            )
+            * g_cloud[k, :, 0, zone_idx, :]
+        )
+        return (w_cloud_, kcws, kcgs, kcwgs, gctw), None
+
+    (
+        (
+            w_cloud,
+            kappa_cloud_w_cloud_sum,
+            kappa_cloud_g_cloud_sum,
+            kappa_cloud_w_cloud_g_cloud_sum,
+            g_cloud_tot_weighted,
+        ),
+        _,
+    ) = lax.scan(
+        aerosol_step,
+        (
+            w_cloud,
+            kappa_cloud_w_cloud_sum,
+            kappa_cloud_g_cloud_sum,
+            kappa_cloud_w_cloud_g_cloud_sum,
+            g_cloud_tot_weighted,
+        ),
+        jnp.arange(n_aerosol),
+    )
+
+    g_cloud_tot_weighted = jnp.nan_to_num(g_cloud_tot_weighted, nan=0.0)
 
     ftau_cld = (kappa_cloud_w_cloud_sum[:, 0, zone_idx, :]) / (
         kappa_cloud_w_cloud_sum[:, 0, zone_idx, :]
@@ -528,46 +648,46 @@ def reflection_Toon(
         + (kappa_cloud_w_cloud_sum[:, 0, zone_idx, :])
     ) / kappa_tot
 
-    P = np.flipud(P)
-    dtau_tot = np.flipud(dtau_tot)
-    w_tot = np.flipud(w_tot)
-    g_cloud_tot_weighted = np.flipud(g_cloud_tot_weighted)
-    ftau_cld = np.flipud(ftau_cld)
-    ftau_ray = np.flipud(ftau_ray)
+    P = jnp.flipud(P)
+    dtau_tot = jnp.flipud(dtau_tot)
+    w_tot = jnp.flipud(w_tot)
+    g_cloud_tot_weighted = jnp.flipud(g_cloud_tot_weighted)
+    ftau_cld = jnp.flipud(ftau_cld)
+    ftau_ray = jnp.flipud(ftau_ray)
     g_cloud_tot_weighted = g_cloud_tot_weighted[:, 0, zone_idx, :]
 
-    tau = np.zeros((N_layer + 1, N_wl))
-    tau[1:, :] = numba_cumsum(dtau_tot[:, :])
+    tau = jnp.zeros((N_layer + 1, N_wl))
+    tau = tau.at[1:, :].set(numba_cumsum(dtau_tot[:, :]))
 
     stream = 2
     f_deltaM = g_cloud_tot_weighted**stream
     w_dedd = w_tot * (1.0 - f_deltaM) / (1.0 - w_tot * f_deltaM)
     g_dedd = (g_cloud_tot_weighted - f_deltaM) / (1.0 - f_deltaM)
     dtau_dedd = dtau_tot * (1.0 - w_tot * f_deltaM)
-    tau_dedd = np.zeros((N_layer + 1, N_wl))
-    tau_dedd[1:, :] = numba_cumsum(dtau_dedd[:, :])
+    tau_dedd = jnp.zeros((N_layer + 1, N_wl))
+    tau_dedd = tau_dedd.at[1:, :].set(numba_cumsum(dtau_dedd[:, :]))
 
-    gangle = np.array(
+    gangle = jnp.array(
         [0.0985350858, 0.3045357266, 0.5620251898, 0.8019865821, 0.9601901429]
     )
-    gweight = np.array(
+    gweight = jnp.array(
         [0.0157479145, 0.0739088701, 0.1463869871, 0.1671746381, 0.0967815902]
     )
 
-    phase_angle = 0
+    phase_angle = 0.0
     cos_theta = 1.0
-    longitude = np.arcsin(
+    longitude = jnp.arcsin(
         (gangle - (cos_theta - 1.0) / (cos_theta + 1.0)) / (2.0 / (cos_theta + 1))
     )
-    colatitude = np.arccos(0.0)
-    f = np.sin(colatitude)
-    ubar0 = np.outer(np.cos(longitude - phase_angle), f)
-    ubar1 = np.outer(np.cos(longitude), f)
-    F0PI = np.zeros(N_wl) + 1
+    colatitude = jnp.arccos(0.0)
+    f = jnp.sin(colatitude)
+    ubar0 = jnp.outer(jnp.cos(longitude - phase_angle), f)
+    ubar1 = jnp.outer(jnp.cos(longitude), f)
+    F0PI = jnp.zeros(N_wl) + 1
 
-    xint_at_top = np.zeros((Gauss_quad, numt, N_wl))
+    xint_at_top = jnp.zeros((Gauss_quad, numt, N_wl))
 
-    sq3 = np.sqrt(3.0)
+    sq3 = jnp.sqrt(3.0)
     if toon_coefficients == 1:
         g1 = (7 - w_dedd * (4 + 3 * ftau_cld * g_dedd)) / 4
         g2 = -(1 - w_dedd * (4 - 3 * ftau_cld * g_dedd)) / 4
@@ -575,7 +695,7 @@ def reflection_Toon(
         g1 = (sq3 * 0.5) * (2.0 - w_dedd * (1.0 + ftau_cld * g_dedd))
         g2 = (sq3 * w_dedd * 0.5) * (1.0 - ftau_cld * g_dedd)
 
-    lamda = np.sqrt(g1**2 - g2**2)
+    lamda = jnp.sqrt(g1**2 - g2**2)
     gama = (g1 - lamda) / g2
 
     for ng in range(Gauss_quad):
@@ -600,21 +720,21 @@ def reflection_Toon(
                 / (lamda**2 - 1.0 / u0**2.0)
             )
 
-            x = np.exp(-tau_dedd[:-1, :] / u0)
-            c_minus_up = a_minus * x
-            c_plus_up = a_plus * x
-            x = np.exp(-tau_dedd[1:, :] / u0)
-            c_minus_down = a_minus * x
-            c_plus_down = a_plus * x
+            x_ = jnp.exp(-tau_dedd[:-1, :] / u0)
+            c_minus_up = a_minus * x_
+            c_plus_up = a_plus * x_
+            x_ = jnp.exp(-tau_dedd[1:, :] / u0)
+            c_minus_down = a_minus * x_
+            c_plus_down = a_plus * x_
 
             exptrm = lamda * dtau_dedd
             exptrm = slice_gt(exptrm, 35.0)
-            exptrm_positive = np.exp(exptrm)
+            exptrm_positive = jnp.exp(exptrm)
             exptrm_minus = 1.0 / exptrm_positive
 
-            b_surface = 0.0 + surf_reflect * u0 * F0PI * np.exp(-tau_dedd[-1, :] / u0)
+            b_surface = 0.0 + surf_reflect * u0 * F0PI * jnp.exp(-tau_dedd[-1, :] / u0)
 
-            A, B, C, D = setup_tri_diag(
+            A, Bm, Cm, Dm = setup_tri_diag(
                 N_layer,
                 N_wl,
                 c_plus_up,
@@ -630,20 +750,17 @@ def reflection_Toon(
                 exptrm_minus,
             )
 
-            positive = np.zeros((N_layer, N_wl))
-            negative = np.zeros((N_layer, N_wl))
-            L = N_layer + N_layer
-            for w in range(N_wl):
-                X = tri_diag_solve(L, A[:, w], B[:, w], C[:, w], D[:, w])
-                positive[:, w] = X[::2] + X[1::2]
-                negative[:, w] = X[::2] - X[1::2]
+            X_all = jax.vmap(_tri_diag_solve_scan, in_axes=(1, 1, 1, 1))(
+                A, Bm, Cm, Dm
+            ).T
+            positive = X_all[::2, :] + X_all[1::2, :]
+            negative = X_all[::2, :] - X_all[1::2, :]
 
-            xint = np.zeros((N_layer + 1, N_wl))
-            xint[-1, :] = (
+            xint_last = (
                 positive[-1, :] * exptrm_positive[-1, :]
                 + gama[-1, :] * negative[-1, :] * exptrm_minus[-1, :]
                 + c_plus_down[-1, :]
-            ) / np.pi
+            ) / jnp.pi
 
             if multi_phase == 0:
                 ubar2 = 0.767
@@ -657,16 +774,16 @@ def reflection_Toon(
                     - 1.5 * ftau_cld * g_dedd * u1
                     + gcos2 * (3.0 * ubar2 * ubar2 * u1 * u1 - 1.0) / 2.0
                 )
-            elif multi_phase == 1:
+            else:  # multi_phase == 1
                 multi_plus = 1.0 + 1.5 * ftau_cld * g_dedd * u1
                 multi_minus = 1.0 - 1.5 * ftau_cld * g_dedd * u1
 
             G = positive * (multi_plus + gama * multi_minus) * w_dedd
             H = negative * (gama * multi_plus + multi_minus) * w_dedd
             A_ms = (multi_plus * c_plus_up + multi_minus * c_minus_up) * w_dedd
-            G *= 0.5 / np.pi
-            H *= 0.5 / np.pi
-            A_ms *= 0.5 / np.pi
+            G = G * 0.5 / jnp.pi
+            H = H * 0.5 / jnp.pi
+            A_ms = A_ms * 0.5 / jnp.pi
 
             g_forward = constant_forward * g_cloud_tot_weighted
             g_back = constant_back * g_cloud_tot_weighted
@@ -674,38 +791,43 @@ def reflection_Toon(
             p_single = ftau_cld * (
                 (frac_a + frac_b * g_back**frac_c)
                 * (1 - g_forward**2)
-                / np.sqrt((1 + g_forward**2 + 2 * g_forward * cos_theta) ** 3)
+                / jnp.sqrt((1 + g_forward**2 + 2 * g_forward * cos_theta) ** 3)
                 + (1 - (frac_a + frac_b * g_back**frac_c))
                 * (1 - g_back**2)
-                / np.sqrt((1 + g_back**2 + 2 * g_back * cos_theta) ** 3)
+                / jnp.sqrt((1 + g_back**2 + 2 * g_back * cos_theta) ** 3)
             ) + ftau_ray * (0.75 * (1 + cos_theta**2.0))
 
-            for i in range(N_layer - 1, -1, -1):
-                xint[i, :] = (
-                    xint[i + 1, :] * np.exp(-dtau_dedd[i, :] / u1)
-                    + (w_tot[i, :] * F0PI / (4.0 * np.pi))
+            # Reverse sweep i = N_layer-1 ... 0, carry xint_{i+1}.
+            def xint_body(xint_prev, itop):
+                i = N_layer - 1 - itop
+                xint_new = (
+                    xint_prev * jnp.exp(-dtau_dedd[i, :] / u1)
+                    + (w_tot[i, :] * F0PI / (4.0 * jnp.pi))
                     * (p_single[i, :])
-                    * np.exp(-tau[i, :] / u0)
-                    * (1.0 - np.exp(-dtau_tot[i, :] * (u0 + u1) / (u0 * u1)))
+                    * jnp.exp(-tau[i, :] / u0)
+                    * (1.0 - jnp.exp(-dtau_tot[i, :] * (u0 + u1) / (u0 * u1)))
                     * (u0 / (u0 + u1))
                     + A_ms[i, :]
-                    * (1.0 - np.exp(-dtau_dedd[i, :] * (u0 + 1 * u1) / (u0 * u1)))
+                    * (1.0 - jnp.exp(-dtau_dedd[i, :] * (u0 + 1 * u1) / (u0 * u1)))
                     * (u0 / (u0 + 1 * u1))
                     + G[i, :]
-                    * (np.exp(exptrm[i, :] * 1 - dtau_dedd[i, :] / u1) - 1.0)
+                    * (jnp.exp(exptrm[i, :] * 1 - dtau_dedd[i, :] / u1) - 1.0)
                     / (lamda[i, :] * 1 * u1 - 1.0)
                     + H[i, :]
-                    * (1.0 - np.exp(-exptrm[i, :] * 1 - dtau_dedd[i, :] / u1))
+                    * (1.0 - jnp.exp(-exptrm[i, :] * 1 - dtau_dedd[i, :] / u1))
                     / (lamda[i, :] * 1 * u1 + 1.0)
                 )
+                return xint_new, xint_new
 
-            xint_at_top[ng, nt, :] = xint[0, :]
+            _, xint_stack = lax.scan(xint_body, xint_last, jnp.arange(N_layer))
+            xint_top = xint_stack[N_layer - 1]
+            xint_at_top = xint_at_top.at[ng, nt, :].set(xint_top)
 
-    tweight = np.array([1])
-    sym_fac = 2 * np.pi
-    albedo = np.zeros(N_wl)
-    for ig in range(len(gweight)):
-        for it in range(len(tweight)):
+    tweight = jnp.array([1.0])
+    sym_fac = 2 * jnp.pi
+    albedo = jnp.zeros(N_wl)
+    for ig in range(Gauss_quad):
+        for it in range(int(tweight.shape[0])):
             albedo = albedo + xint_at_top[ig, it, :] * gweight[ig] * tweight[it]
     albedo = sym_fac * 0.5 * albedo / F0PI * (cos_theta + 1.0)
     return albedo
@@ -724,8 +846,8 @@ def build_surf_reflect(
 ):
     """Construct ``(surf_reflect, surf_reflect_array)``.
 
-    Bit-equivalent port of POSEIDON ``core.py:1741-1770`` (the CPU branch
-    of the inline `surf_reflect` construction inside `compute_spectrum`).
+    Bit-equivalent port of POSEIDON ``core.py:1741-1770``. Setup-time
+    branching on string dispatch keys; setup-only, not called inside jit.
     """
     from jaxposeidon._surface_setup import interpolate_surface_components
 
@@ -788,8 +910,9 @@ def assign_assumptions_and_compute_single_stream_emission(
 ):
     """Surface/albedo-aware single-stream emission orchestrator.
 
-    Bit-equivalent port of POSEIDON `emission.py:1681-1878` (CPU-only
-    subset; thermal_scattering branch and GPU exits are not ported).
+    Port of POSEIDON `emission.py:1681-1878` (CPU subset). String-keyed
+    setup dispatch is done in Python (setup-only); the leaf single-stream
+    calls themselves are JAX-traceable.
     """
     from jaxposeidon._surface_setup import find_nearest_less_than
 
@@ -799,9 +922,6 @@ def assign_assumptions_and_compute_single_stream_emission(
             kappa_gas[:, 0, zone_idx, :]
             + kappa_Ray[:, 0, zone_idx, :]
             + kappa_cloud_clear[:, 0, zone_idx, :]
-        )
-        dtau_tot_clear = np.ascontiguousarray(  # noqa: F841
-            kappa_tot_clear * dz.reshape((len(P), 1))
         )
         if len(aerosol_species) >= 2:
             raise Exception(
@@ -875,9 +995,9 @@ def assign_assumptions_and_compute_single_stream_emission(
                 else:
                     F_p_temp = emission_bare_surface(T_surf, wl, surf_reflect_n)
                 F_p_array.append(F_p_temp)
-            F_p = np.zeros_like(wl)
+            F_p = jnp.zeros_like(wl)
             for n in range(len(surface_component_percentages)):
-                F_p += surface_component_percentages[n] * F_p_array[n]
+                F_p = F_p + surface_component_percentages[n] * F_p_array[n]
 
         if not disable_atmosphere:
             dtau = dtau_tot
@@ -885,7 +1005,7 @@ def assign_assumptions_and_compute_single_stream_emission(
             dtau = 0
     else:
         F_p, dtau = emission_single_stream(T, dz, wl, kappa_tot, Gauss_quad)
-        dtau = np.flip(dtau, axis=0)
+        dtau = jnp.flip(dtau, axis=0)
         if cloud_dim == 2:
             F_p_clear, dtau = emission_single_stream(
                 T, dz, wl, kappa_tot_clear, Gauss_quad
@@ -898,39 +1018,37 @@ def assign_assumptions_and_compute_single_stream_emission(
 def reflection_bare_surface(wl, surf_reflect, Gauss_quad=5):
     """Bare-rock reflected-light albedo with 5-pt Gaussian disk integration.
 
-    Bit-equivalent port of POSEIDON `emission.py:1612-1700` simplified
-    (assumes phase_angle=0, F0PI=1).
+    Bit-equivalent port of POSEIDON `emission.py:1612-1700` simplified.
     """
-    N_wl = len(wl)
-    gangle = np.array(
+    wl = jnp.asarray(wl, dtype=jnp.float64)
+    surf_reflect = jnp.asarray(surf_reflect, dtype=jnp.float64)
+    N_wl = wl.shape[0]
+    gangle = jnp.array(
         [0.0985350858, 0.3045357266, 0.5620251898, 0.8019865821, 0.9601901429]
     )
-    gweight = np.array(
+    gweight = jnp.array(
         [0.0157479145, 0.0739088701, 0.1463869871, 0.1671746381, 0.0967815902]
     )
-    tangle = np.array([0])  # noqa: F841
-    tweight = np.array([1])
+    tweight = jnp.array([1.0])
     cos_theta = 1.0
-    F0PI = np.zeros(N_wl) + 1
-    phase_angle = 0
-    longitude = np.arcsin(
+    F0PI = jnp.zeros(N_wl) + 1
+    phase_angle = 0.0
+    longitude = jnp.arcsin(
         (gangle - (cos_theta - 1.0) / (cos_theta + 1.0)) / (2.0 / (cos_theta + 1))
     )
-    colatitude = np.arccos(0.0)
-    f = np.sin(colatitude)
-    ubar0 = np.outer(np.cos(longitude - phase_angle), f)
-    ubar1 = np.outer(np.cos(longitude), f)  # noqa: F841
+    colatitude = jnp.arccos(0.0)
+    f = jnp.sin(colatitude)
+    ubar0 = jnp.outer(jnp.cos(longitude - phase_angle), f)
 
-    sym_fac = 2 * np.pi
-    xint_at_top = np.zeros((len(gangle), len(tweight), N_wl))
-    for ig in range(len(gangle)):
-        for _it in range(len(tweight)):
-            u0 = ubar0[ig, 0]
-            xint_at_top[ig, 0, :] = surf_reflect * u0 * F0PI / np.pi
+    sym_fac = 2 * jnp.pi
+    xint_at_top = jnp.zeros((Gauss_quad, tweight.shape[0], N_wl))
+    for ig in range(Gauss_quad):
+        u0 = ubar0[ig, 0]
+        xint_at_top = xint_at_top.at[ig, 0, :].set(surf_reflect * u0 * F0PI / jnp.pi)
 
-    albedo = np.zeros(N_wl)
-    for ig in range(len(gweight)):
-        for it in range(len(tweight)):
-            albedo += xint_at_top[ig, it, :] * gweight[ig] * tweight[it]
+    albedo = jnp.zeros(N_wl)
+    for ig in range(Gauss_quad):
+        for it in range(int(tweight.shape[0])):
+            albedo = albedo + xint_at_top[ig, it, :] * gweight[ig] * tweight[it]
     albedo = sym_fac * 0.5 * albedo / F0PI * (cos_theta + 1.0)
     return albedo

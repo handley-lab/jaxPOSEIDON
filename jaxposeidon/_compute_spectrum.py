@@ -28,6 +28,8 @@ from jaxposeidon._emission import (
     build_surf_reflect,
     determine_photosphere_radii,
     emission_single_stream,
+    emission_Toon,
+    reflection_Toon,
 )
 from jaxposeidon._lbl import extinction_LBL
 from jaxposeidon._opacities import extinction
@@ -91,11 +93,6 @@ def compute_spectrum(
             f"device={device!r}: jaxposeidon v0.5 is CPU/numpy parity only; "
             "GPU is the v1 JAX-trace work."
         )
-    if return_albedo:
-        raise NotImplementedError(
-            "return_albedo=True applies to emission/reflection spectrum_types; "
-            "the spectrum_type dispatch wiring is the Phase 0.5.13c follow-up."
-        )
     disable_atmosphere = model["disable_atmosphere"]
 
     if spectrum_type not in (
@@ -105,6 +102,7 @@ def compute_spectrum(
         "dayside_emission",
         "nightside_emission",
         "direct_emission",
+        "reflection",
     ):
         raise NotImplementedError(
             f"spectrum_type={spectrum_type!r} not a known POSEIDON option"
@@ -115,12 +113,7 @@ def compute_spectrum(
             "'opacity_sampling' and 'line_by_line' are supported."
         )
     is_emission = "emission" in spectrum_type
-    if is_emission and (model.get("thermal_scattering") or model.get("reflection")):
-        raise NotImplementedError(
-            "thermal_scattering / reflection in emission: Phase 0.5.13b Toon "
-            "solvers are ported, but their integration with compute_spectrum "
-            "is the Phase 0.5.13e follow-up."
-        )
+    is_reflection = spectrum_type == "reflection"
     cloud_model = model.get("cloud_model", "cloud-free")
     if cloud_model not in _V0_CLOUD_MODELS:
         raise NotImplementedError(
@@ -351,13 +344,16 @@ def compute_spectrum(
         if cloud_model == "eddysed":
             kappa_cloud = np.array(atmosphere["kappa_cloud_eddysed"])
 
-    if is_emission:
+    if is_emission or is_reflection:
         if "dayside" in spectrum_type:
             zone_idx = 0
         elif "nightside" in spectrum_type:
             zone_idx = -1
         else:
             zone_idx = 0
+
+        thermal_scattering = bool(model.get("thermal_scattering", False))
+        reflection_on = bool(model.get("reflection", False))
 
         if not disable_atmosphere:
             dz = dr[:, 0, zone_idx]
@@ -375,7 +371,81 @@ def compute_spectrum(
             dtau_tot = np.array([])
 
         use_surface_path = surface or albedo_deck != -1 or disable_atmosphere
-        if use_surface_path:
+        if is_reflection:
+            # Pure reflection: Toon multi-scattering albedo.
+            n_aerosol_sep = (
+                max(1, kappa_cloud.shape[0]) if hasattr(kappa_cloud, "shape") else 1
+            )
+            kappa_cloud_sep = (
+                np.zeros((1,) + kappa_cloud.shape)
+                if not disable_atmosphere
+                else np.zeros((1, 0, 1, 1, len(wl)))
+            )
+            w_cloud_arr = np.zeros_like(kappa_cloud_sep)
+            g_cloud_arr = np.zeros_like(kappa_cloud_sep)
+            surf_reflect_arr = (
+                np.zeros(len(wl))
+                if not surface
+                else np.full(
+                    len(wl), albedo_surf if surface_model == "constant" else 0.0
+                )
+            )
+            if not disable_atmosphere:
+                albedo = reflection_Toon(
+                    P,
+                    wl,
+                    dtau_tot,
+                    kappa_Ray,
+                    kappa_cloud,
+                    kappa_tot,
+                    w_cloud_arr,
+                    g_cloud_arr,
+                    zone_idx,
+                    surf_reflect_arr,
+                    kappa_cloud_sep,
+                )
+            else:
+                from jaxposeidon._emission import reflection_bare_surface
+
+                albedo = reflection_bare_surface(wl, surf_reflect_arr)
+            spectrum = albedo
+            if return_albedo:
+                return spectrum, albedo
+            return spectrum
+        cloud_dim = model.get("cloud_dim", 1)
+        aerosol_species = model.get("aerosol_species", [])
+        if thermal_scattering and not disable_atmosphere:
+            surf_reflect, _surf_arr = build_surf_reflect(
+                wl,
+                surface,
+                surface_model,
+                albedo_deck,
+                albedo_surf,
+                surface_components,
+                surface_component_albedos,
+                surface_component_percentages,
+                surface_percentage_apply_to,
+            )
+            kappa_cloud_sep = np.zeros((1,) + kappa_cloud.shape)
+            w_cloud_arr = np.zeros_like(kappa_cloud_sep)
+            g_cloud_arr = np.zeros_like(kappa_cloud_sep)
+            hard_surface = 1 if (surface or albedo_deck != -1) else 0
+            F_p, dtau = emission_Toon(
+                P,
+                T_em,
+                wl,
+                dtau_tot,
+                kappa_Ray,
+                kappa_cloud,
+                kappa_tot,
+                w_cloud_arr,
+                g_cloud_arr,
+                zone_idx,
+                surf_reflect,
+                kappa_cloud_sep,
+                hard_surface=hard_surface,
+            )
+        elif use_surface_path:
             surf_reflect, surf_reflect_array = build_surf_reflect(
                 wl,
                 surface,
@@ -387,8 +457,6 @@ def compute_spectrum(
                 surface_component_percentages,
                 surface_percentage_apply_to,
             )
-            cloud_dim = model.get("cloud_dim", 1)
-            aerosol_species = model.get("aerosol_species", [])
             F_p, dtau = assign_assumptions_and_compute_single_stream_emission(
                 P,
                 T_em,
@@ -460,6 +528,34 @@ def compute_spectrum(
             F_p_obs = (R_p_eff / d) ** 2 * F_p
             spectrum = F_p_obs / F_s_obs
 
+        # Add reflected-light contribution if model.reflection is True.
+        albedo = None
+        if reflection_on and not disable_atmosphere:
+            kappa_cloud_sep = np.zeros((1,) + kappa_cloud.shape)
+            w_cloud_arr = np.zeros_like(kappa_cloud_sep)
+            g_cloud_arr = np.zeros_like(kappa_cloud_sep)
+            surf_reflect_arr = (
+                np.zeros(len(wl))
+                if not surface
+                else np.full(
+                    len(wl), albedo_surf if surface_model == "constant" else 0.0
+                )
+            )
+            albedo = reflection_Toon(
+                P,
+                wl,
+                dtau_tot,
+                kappa_Ray,
+                kappa_cloud,
+                kappa_tot,
+                w_cloud_arr,
+                g_cloud_arr,
+                zone_idx,
+                surf_reflect_arr,
+                kappa_cloud_sep,
+            )
+            spectrum = spectrum + albedo
+
         if save_spectrum:
             from jaxposeidon._output import write_spectrum
 
@@ -469,6 +565,8 @@ def compute_spectrum(
                 spectrum=spectrum,
                 wl=wl,
             )
+        if return_albedo:
+            return spectrum, albedo
         return spectrum
 
     # Transmission paths (TRIDENT chord integration).
