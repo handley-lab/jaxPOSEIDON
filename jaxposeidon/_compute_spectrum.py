@@ -83,18 +83,6 @@ def compute_spectrum(
             "return_albedo=True applies to emission/reflection spectrum_types; "
             "the spectrum_type dispatch wiring is the Phase 0.5.13c follow-up."
         )
-    if len(kappa_contributions):
-        if len(kappa_contributions) != 4:
-            raise ValueError(
-                "kappa_contributions must be a 4-tuple "
-                "(kappa_gas, kappa_Ray, kappa_cloud, kappa_cloud_separate)."
-            )
-        if len(cloud_properties_contributions) not in (0, 2):
-            raise ValueError(
-                "cloud_properties_contributions must be a 2-tuple "
-                "(w_cloud, g_cloud) when provided."
-            )
-
     disable_atmosphere = model["disable_atmosphere"]
     if disable_atmosphere:
         raise NotImplementedError("disable_atmosphere=True (bare-rock) is v1")

@@ -35,6 +35,23 @@ execute its own string branch.
 hit this path in either POSEIDON or jaxposeidon; the divergence is
 documentation-only.
 
+### Phase 0.5.17b contribution-kernel index initialization
+
+POSEIDON's `extinction_spectral_contribution` /
+`extinction_pressure_contribution` are numba `@jit(nopython=True)`
+kernels. When `contribution_species` is not present in either
+`chemical_species` or `active_species` (e.g. `'H-'`, which lives in
+`bf_species`), the lookup loops at `contributions.py:215-222` /
+`:1207-1214` never bind `contribution_molecule_species_index` /
+`contribution_molecule_active_index`. Under numba, integer locals
+default to `0`; under stock Python they would raise
+`UnboundLocalError`. The port initializes both indices to `0` before
+the lookup loops, matching numba's observable behaviour. The
+`bound_free=True` / `bulk_species=True` / `cloud_contribution=True`
+paths guard those references explicitly, so the `0` default is only
+read on paths where POSEIDON itself reads it (and there too gets
+`0`).
+
 ## Resolved
 
 - **Phase 4 extinction parametric tolerance**: POSEIDON's numba reduction

@@ -54,28 +54,13 @@ def _bulk_metadata(chemical_species, active_species, cia_pairs):
     return N_bulk_species, bulk_species_indices, bulk_cia_indices
 
 
-def _species_indices(chemical_species, active_species, cia_pairs, contribution_species):
-    contribution_molecule_species_index = -1
-    for i in range(len(chemical_species)):
-        if contribution_species == chemical_species[i]:
-            contribution_molecule_species_index = i
-
-    contribution_molecule_active_index = -1
-    for i in range(len(active_species)):
-        if contribution_species == active_species[i]:
-            contribution_molecule_active_index = i
-
+def _cia_indices_for(cia_pairs, contribution_species):
     cia_indices = []
     for i in range(len(cia_pairs)):
         pair_1, pair_2 = cia_pairs[i].split("-")
         if contribution_species == pair_1 or contribution_species == pair_2:
             cia_indices.append(i)
-
-    return (
-        contribution_molecule_species_index,
-        contribution_molecule_active_index,
-        cia_indices,
-    )
+    return cia_indices
 
 
 def extinction_spectral_contribution(
@@ -121,7 +106,13 @@ def extinction_spectral_contribution(
     cloud_species="",
     cloud_total_contribution=False,
 ):
-    """Per-species kappa generator for spectral contribution plots."""
+    """Per-species kappa generator for spectral contribution plots.
+
+    Mirrors POSEIDON ``contributions.py:143-505``
+    (``extinction_spectral_contribution``). Surface (``enable_surface=1``)
+    and Mie (``enable_Mie=1``) branches are deferred to v1 to match
+    ``_opacities.extinction``'s v0 envelope.
+    """
     if enable_surface == 1:
         raise NotImplementedError("surfaces deferred to v1")
     if enable_Mie == 1:
@@ -137,18 +128,19 @@ def extinction_spectral_contribution(
         chemical_species, active_species, cia_pairs
     )
 
+    contribution_molecule_species_index = 0
+    contribution_molecule_active_index = 0
+    cia_indices = []
     if not bulk_species and not cloud_contribution:
-        (
-            contribution_molecule_species_index,
-            contribution_molecule_active_index,
-            cia_indices,
-        ) = _species_indices(
-            chemical_species, active_species, cia_pairs, contribution_species
-        )
-    else:
-        contribution_molecule_species_index = -1
-        contribution_molecule_active_index = -1
-        cia_indices = []
+        for i in range(len(chemical_species)):
+            if contribution_species == chemical_species[i]:
+                contribution_molecule_species_index = i
+
+        for i in range(len(active_species)):
+            if contribution_species == active_species[i]:
+                contribution_molecule_active_index = i
+
+        cia_indices = _cia_indices_for(cia_pairs, contribution_species)
 
     bound_free = contribution_species == "H-"
 
@@ -301,7 +293,13 @@ def extinction_pressure_contribution(
     layer_to_ignore=0,
     total_pressure_contribution=False,
 ):
-    """Per-layer kappa generator for pressure contribution plots."""
+    """Per-layer kappa generator for pressure contribution plots.
+
+    Mirrors POSEIDON ``contributions.py:1135-1550``
+    (``extinction_pressure_contribution``). Surface (``enable_surface=1``)
+    and Mie (``enable_Mie=1``) branches are deferred to v1 to match
+    ``_opacities.extinction``'s v0 envelope.
+    """
     if enable_surface == 1:
         raise NotImplementedError("surfaces deferred to v1")
     if enable_Mie == 1:
@@ -317,18 +315,19 @@ def extinction_pressure_contribution(
         chemical_species, active_species, cia_pairs
     )
 
+    contribution_molecule_species_index = 0
+    contribution_molecule_active_index = 0
+    cia_indices = []
     if not bulk_species and not cloud_contribution:
-        (
-            contribution_molecule_species_index,
-            contribution_molecule_active_index,
-            cia_indices,
-        ) = _species_indices(
-            chemical_species, active_species, cia_pairs, contribution_species
-        )
-    else:
-        contribution_molecule_species_index = -1
-        contribution_molecule_active_index = -1
-        cia_indices = []
+        for i in range(len(chemical_species)):
+            if contribution_species == chemical_species[i]:
+                contribution_molecule_species_index = i
+
+        for i in range(len(active_species)):
+            if contribution_species == active_species[i]:
+                contribution_molecule_active_index = i
+
+        cia_indices = _cia_indices_for(cia_pairs, contribution_species)
 
     bound_free = contribution_species == "H-"
 
