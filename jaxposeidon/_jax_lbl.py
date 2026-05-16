@@ -132,27 +132,19 @@ def compute_kappa_LBL_jit(
     kappa_cloud = jnp.zeros_like(kappa_gas)
 
     if enable_haze == 1:
-        # POSEIDON: haze_amp[i,j,k] = n[i,j,k] * a * 5.31e-31;
-        # slope[l] = (wl_model[l] / 0.35) ** gamma
         slope = jnp.power(wl_model / 0.35, gamma)  # (N_wl,)
         haze_amp = n * a * 5.31e-31  # (N_layers, N_s, N_z)
         haze_kappa = haze_amp[..., None] * slope[None, None, None, :]
         kappa_cloud = kappa_cloud + haze_kappa
 
     if enable_deck == 1:
-        # POSEIDON: kappa_cloud[(P_cloud < P), j, k, :] += kappa_cloud_0
-        # P_cloud is a scalar (or shape (1,)) in POSEIDON; we accept either.
-        P_cloud_scalar = jnp.asarray(P_cloud).reshape(())  # extract scalar
-        deck_mask = (P_cloud_scalar < P).astype(jnp.float64)  # (N_layers,)
+        P_cloud_scalar = jnp.asarray(P_cloud).reshape(())
+        deck_mask = (P_cloud_scalar < P).astype(jnp.float64)
         deck_contrib = deck_mask[:, None, None, None] * kappa_cloud_0
         kappa_cloud = kappa_cloud + deck_contrib
 
     if enable_surface == 1:
-        # POSEIDON: kappa_gas[(P_surf < P), j, k, :] = 1.0e250
-        # This is a SET (not add) — overrides whatever kappa_gas was.
-        surf_mask = (P_surf < P).astype(jnp.float64)  # (N_layers,)
-        surf_contrib = surf_mask[:, None, None, None] * 1.0e250
-        # Mask out the existing kappa_gas at surface layers and set to 1e250
+        surf_mask = (P_surf < P).astype(jnp.float64)
         kappa_gas = jnp.where(
             surf_mask[:, None, None, None] > 0.5,
             jnp.full_like(kappa_gas, 1.0e250),

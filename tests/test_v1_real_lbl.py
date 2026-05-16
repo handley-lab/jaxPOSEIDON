@@ -104,6 +104,17 @@ def _fixture(
         ("disable_continuum", {"disable_continuum": True}),
         ("with_ff_bf", {"N_ff": 2, "N_bf": 1}),
         ("haze_deck_combo", {"enable_haze": 1, "enable_deck": 1}),
+        (
+            "all_branches",
+            {
+                "enable_haze": 1,
+                "enable_deck": 1,
+                "enable_surface": 1,
+                "disable_continuum": True,
+                "N_ff": 2,
+                "N_bf": 1,
+            },
+        ),
     ],
 )
 def test_compute_kappa_LBL_jit_parity_with_numpy(label, fixture_kwargs):
@@ -226,6 +237,72 @@ def test_grad_through_jit_compute_kappa_LBL_via_X_active():
     np.testing.assert_allclose(
         float(g.reshape(-1)[idx]), float(fd), rtol=1e-4, atol=1e-30,
     )
+
+
+def test_grad_through_jit_compute_kappa_LBL_via_haze_amplitude_a():
+    """jax.grad through haze amplitude `a` (with enable_haze=1) is
+    finite + nonzero + matches finite difference."""
+    cfg = _fixture(enable_haze=1)
+
+    def _loss(a_scalar):
+        kg, _kR, kc = compute_kappa_LBL_jit(
+            jnp.asarray(cfg["wl_model"]),
+            jnp.asarray(cfg["X"]), jnp.asarray(cfg["X_active"]),
+            jnp.asarray(cfg["X_cia"]),
+            jnp.asarray(cfg["X_ff"]), jnp.asarray(cfg["X_bf"]),
+            jnp.asarray(cfg["n"]), jnp.asarray(cfg["P"]),
+            a_scalar, cfg["gamma"],
+            jnp.asarray(cfg["P_cloud"]), cfg["kappa_cloud_0"],
+            jnp.asarray(cfg["sigma_interp"]), jnp.asarray(cfg["cia_interp"]),
+            jnp.asarray(cfg["Rayleigh_stored"]),
+            jnp.asarray(cfg["ff_stored"]), jnp.asarray(cfg["bf_stored"]),
+            cfg["enable_haze"], cfg["enable_deck"], cfg["enable_surface"],
+            cfg["P_surf"], cfg["disable_continuum"],
+        )
+        return jnp.sum(kc)  # haze contributes to kappa_cloud
+
+    a0 = jnp.float64(1.0)
+    g = jax.grad(jax.jit(_loss))(a0)
+    assert jnp.isfinite(g)
+    assert g != 0.0
+    # Finite-difference cross-check
+    h = 1e-4
+    fd = (_loss(a0 + h) - _loss(a0 - h)) / (2 * h)
+    np.testing.assert_allclose(float(g), float(fd), rtol=1e-6, atol=1e-30)
+
+
+def test_grad_through_jit_compute_kappa_LBL_via_kappa_cloud_0():
+    """jax.grad through deck opacity kappa_cloud_0 (with enable_deck=1)
+    is finite + nonzero + matches finite difference."""
+    cfg = _fixture(enable_deck=1)
+    # Pick P_cloud such that a few layers are above (P > P_cloud).
+    cfg["P_cloud"] = np.array([1.0])  # mid-range
+
+    def _loss(kappa_cloud_0_scalar):
+        kg, _kR, kc = compute_kappa_LBL_jit(
+            jnp.asarray(cfg["wl_model"]),
+            jnp.asarray(cfg["X"]), jnp.asarray(cfg["X_active"]),
+            jnp.asarray(cfg["X_cia"]),
+            jnp.asarray(cfg["X_ff"]), jnp.asarray(cfg["X_bf"]),
+            jnp.asarray(cfg["n"]), jnp.asarray(cfg["P"]),
+            cfg["a"], cfg["gamma"],
+            jnp.asarray(cfg["P_cloud"]), kappa_cloud_0_scalar,
+            jnp.asarray(cfg["sigma_interp"]), jnp.asarray(cfg["cia_interp"]),
+            jnp.asarray(cfg["Rayleigh_stored"]),
+            jnp.asarray(cfg["ff_stored"]), jnp.asarray(cfg["bf_stored"]),
+            cfg["enable_haze"], cfg["enable_deck"], cfg["enable_surface"],
+            cfg["P_surf"], cfg["disable_continuum"],
+        )
+        return jnp.sum(kc)
+
+    k0 = jnp.float64(1e-3)
+    g = jax.grad(jax.jit(_loss))(k0)
+    assert jnp.isfinite(g)
+    assert g != 0.0
+    # FD check
+    h = 1e-6
+    fd = (_loss(k0 + h) - _loss(k0 - h)) / (2 * h)
+    np.testing.assert_allclose(float(g), float(fd), rtol=1e-6, atol=1e-30)
 
 
 def test_make_jaxpr_compute_kappa_LBL_succeeds():
