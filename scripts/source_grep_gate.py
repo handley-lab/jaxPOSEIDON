@@ -62,6 +62,7 @@ ALLOW_LISTED = {
     "_jax_filters.py",
     "_jax_interpolate.py",
     "_jax_special.py",
+    "_jax_transmission_setup.py",
     "_constants.py",
     "_species_data.py",
     "_h_minus.py",
