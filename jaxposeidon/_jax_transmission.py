@@ -254,12 +254,18 @@ def TRIDENT_real_jit(
     """Real JAX TRIDENT — setup-only numpy outside jit, jnp kernel inside.
 
     Replaces ``TRIDENT_callback`` for the typical retrieval case where
-    cloud-morphology parameters (``f_cloud``, ``phi_0``, ``theta_0``,
-    ``enable_deck``) are **fixed** across the jit boundary (i.e., the
-    sampler varies physics parameters that flow through ``kappa_*``
-    and atmosphere arrays, not cloud topology). For those callers,
-    ``jax.grad`` flows through ``kappa_clear``, ``kappa_cloud``, and
-    ``dr``.
+    cloud-morphology and atmosphere-geometry parameters are **fixed**
+    across the jit boundary (i.e., the sampler varies opacity
+    channels ``kappa_clear`` / ``kappa_cloud``, not cloud topology
+    or atmosphere radii). For those callers, ``jax.grad`` flows
+    through ``kappa_clear`` and ``kappa_cloud`` end-to-end.
+
+    Inputs that participate in numpy geometric setup
+    (``P``, ``r``, ``r_up``, ``r_low``, ``dr``, ``enable_deck``,
+    ``enable_haze``, ``b_p``, ``y_p``, ``R_s``, ``f_cloud``,
+    ``phi_0``, ``theta_0``, ``phi_edge``, ``theta_edge``) must be
+    concrete Python scalars / numpy arrays; ``jax.grad`` does NOT
+    flow through them at the public-wrapper level.
 
     The numpy geometry setup is delegated to the allow-listed
     ``_jax_transmission_setup.setup_TRIDENT_geometry`` (called outside

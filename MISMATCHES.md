@@ -350,7 +350,7 @@ merge):
 | `_lbl.py` | 1 | Full JAX port of `compute_kappa_LBL` / `interpolate_sigma_LBL` / `interpolate_cia_LBL` / `T_interpolation_init` to jnp; orchestrator `extinction_LBL` (HDF5 I/O) splits to `_lbl_table_loader.py`. |
 | `_opacity_precompute.py` | 1 | Port `closest_index`, `prior_index`, `prior_index_V2`, and the precompute table-fill kernels to jnp; these are the indexing primitives used by both `_opacities.py` and `_lbl.py`. |
 | `_retrieval.py` | 1 | The `make_loglikelihood` closure currently uses `np.array([])` for empty parameter blocks; replace with `jnp.array([])` and ensure the closure returns under `jax.jit` for the full top-level `logp(unit_cube)` gate. |
-| `_transmission.py` | 1 | Full pure-`jnp` TRIDENT port (replaces the v1-C `pure_callback` shim — POSEIDON `transmission.py:289-944`). Out-of-scope for v1.0.0 per documented v1-C deferral. |
+| `_transmission.py` | 1 | The numpy TRIDENT reference; the post-geometry tensor math is already lifted to pure-jnp in `_jax_transmission.TRIDENT_kernel_jit` (v1.0.x real-JAX TRIDENT PR). The remaining numpy is the geometric setup (`extend_rad_transfer_grids`, `path_distribution_geometric`, `delta_ray_geom`, POSEIDON `transmission.py:289-529, 87-285, 633-687`) which produces shape-variable outputs from cloud-morphology scalars. Lifting that into lax-padded form is the v1.x follow-up that enables gradient through geometry. |
 
 ### v1-C pure_callback lift — PARTIALLY shipped in v1.0.x real-JAX TRIDENT PR
 
