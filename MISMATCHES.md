@@ -65,63 +65,50 @@ out-of-range queries to the boundary value (documented as the v1-A
 divergence). Out-of-jit calls preserve POSEIDON's exception path
 exactly.
 
-### v1-C TRIDENT JIT boundary uses `jax.pure_callback`
+### TRIDENT — two paths after v1.0.x real-JAX lift
 
-The v1-C plan row calls for refactoring TRIDENT's data-dependent
-control flow into `lax.cond` / `lax.fori_loop` / `vmap` with
-fixed-buffer maxima for the sector/zone axes. TRIDENT's geometric
-setup (`extend_rad_transfer_grids` -> `path_distribution_geometric`,
-POSEIDON `transmission.py:289-529, 87-285`) has output array shapes
-(`N_phi`, `N_zones`, `theta_edge_all`) that depend on scalar
-inputs `f_cloud`, `phi_0`, `theta_0`, `enable_deck` through
-`np.append` / `np.sort` / `np.unique`-style operations. A
-line-for-line lax-rewrite with fixed-maximum padding is feasible
-but introduces a large surface (geometry + path-integral + tau-vert)
-that doesn't fit in the v1-C scope alongside the other concurrent
-v1 phases.
+**State as of v1.0.x real-JAX TRIDENT PR (2026-05-16):** jaxPOSEIDON
+now exposes **two** transmission entry points. Honest tradeoff
+table:
 
-The shipped v1-C entry point (`_jax_transmission.TRIDENT_callback`,
-`_compute_spectrum.compute_transmission_spectrum_jit`) wraps the
-full numpy `_transmission.TRIDENT` in `jax.pure_callback`. This is
-fully traceable under `jax.jit` and `jax.make_jaxpr` (the v1-C gate
-requirement, scoped to the
-`compute_transmission_spectrum_jit` helper) and bit-exact with POSEIDON to within float64 precision
-(parity tests at `rtol=1e-13, atol=1e-15`, satisfying the v1-C gate
-"matches numpy at `rtol=1e-13` default" -- the underlying callback
-materialises the numpy `_transmission.TRIDENT` output verbatim, so
-the residual is purely the JAX float64 round-trip).
+| Entry point | jit | make_jaxpr | jax.grad through kappa | jax.grad through morphology | Bit-exact vs POSEIDON |
+|---|---|---|---|---|---|
+| `compute_transmission_spectrum_jit` (legacy `TRIDENT_callback`) | ✓ | ✓ | ✗ (pure_callback no VJP) | ✗ | ✓ |
+| `compute_transmission_spectrum_real_jit` (kernel + setup split) | kernel only, NOT public-fn | kernel only | ✓ | ✗ (setup is numpy) | ✓ (parity rtol=1e-13) |
 
-The public `compute_spectrum(..., spectrum_type='transmission', ...)`
-still calls the numpy `_transmission.TRIDENT` directly (its Python
-body has string-dispatch and v0.5 numpy-only branches that are not
-JIT-traceable as-is). The v1-C plan row's "jit-able entry point"
-requirement is met by the dedicated
-`compute_transmission_spectrum_jit` helper; the full
-`compute_spectrum` re-wiring is deferred to v1-D (which lifts the
-emission/dispatch surface) and the v1-E end-to-end gate. The
-relaxations are:
+The legacy path is retained for backward compatibility with the v1-C
+test suite (which wraps the public function directly in `jax.jit`).
+The real-JAX path is the recommended entry point for sampler usage
+that needs gradient through atmospheric physics; cloud-morphology
+parameters (`f_cloud`, `phi_cloud_0`, `theta_cloud_0`, `enable_deck`,
+`enable_haze`, `b_p`, `y_p`, `R_s`) **must be Python scalars** —
+they drive output-shape decisions in the geometric setup
+(`_jax_transmission_setup.setup_TRIDENT_geometry`, POSEIDON
+`transmission.py:289-529, 87-285`) and therefore cannot themselves
+be traced.
 
-- `jax.grad` through `TRIDENT_callback` requires a custom VJP rule
-  (not provided by `pure_callback`). This is now carried to v1.0.x
-  (see "v1-C pure_callback lift (deferred to v1.0.x)" below); the
-  v1-E gate exercises `jax.grad` against the leaf kernels that have
-  a pure-`jnp` foundation (`planck_lambda_arr`, `emission_single_stream`,
-  `stellar_contamination_single_spot`).
-- The forward computation runs on the host CPU inside the callback
-  rather than on the JAX device. For TRIDENT this is the same code
-  path as v0.5 numpy and matches the v1-C gate (which only requires
-  `jax.jit(compute_transmission_spectrum_jit)(...)` to match numpy
-  at rtol=1e-13, not GPU acceleration).
+**Real-JAX path coverage** (`tests/test_v1_real_trident.py`):
 
-The pure-`jnp` kernels for the vectorisable post-processing
-(`compute_tau_vert_jax`, `trans_from_path_tau_jax`) are exposed in
-`_jax_transmission.py` and tested at `rtol=1e-13` parity against
-the numpy oracle; they will compose into the lax-native TRIDENT
-when the v1.0.x follow-up lands (see "v1-C pure_callback lift
-(deferred to v1.0.x)" below — the v1-E end-to-end gate ships with the
-`pure_callback` boundary intact, exercising `jax.jit` and
-`jax.make_jaxpr` on `TRIDENT_callback` while `jax.grad` is exercised
-on the pure-`jnp` leaf kernels).
+- Parametric parity vs POSEIDON numpy at `rtol=1e-13`: 1D cloud-free,
+  enable_deck=1, enable_haze=1, nonzero y_p, 2D patchy cloud_dim=2,
+  multi-zone (N_zones=2), multi-sector (N_sectors=2).
+- `jax.jit(TRIDENT_kernel_jit)` succeeds (kernel takes pre-computed
+  geometry tensors as inputs).
+- `jax.grad(jax.jit(TRIDENT_kernel_jit))(... , kappa_clear, ...)`
+  returns finite, non-zero gradient with finite-difference
+  cross-check (`rtol=1e-4`).
+- `jax.make_jaxpr(TRIDENT_kernel_jit)(...)` returns a jaxpr that
+  does NOT contain `pure_callback`.
+- The public `compute_transmission_spectrum_real_jit`'s source is
+  inspected to assert it calls `TRIDENT_real_jit`, not
+  `TRIDENT_callback` (regression guard).
+
+**Carry-over to v1.x:** Lifting cloud-morphology gradient flow
+requires lax-padding the geometric setup (`N_phi_max` /
+`N_zones_max` bounds and masks) — a substantial refactor of
+`extend_rad_transfer_grids` and `path_distribution_geometric`. Not
+in scope for v1.0.x; tracked here as the next gradient-coverage
+gate.
 
 ### v1-A `_jax_interpolate.regular_grid_interp_linear` boundary handling
 

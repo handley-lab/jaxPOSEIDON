@@ -20,9 +20,13 @@ Two entry points to the TRIDENT chord transmission RT
   ``phi_0``, ``theta_0``) which is why this stays setup-only.
 
 - ``TRIDENT_callback`` — legacy ``jax.pure_callback`` wrapper around
-  the full numpy ``TRIDENT``. Kept for backward compatibility with the
-  v1-C bit-exact path; the public ``compute_transmission_spectrum_jit``
-  now uses the real-kernel chain by default.
+  the full numpy ``TRIDENT``. Still used by
+  ``compute_transmission_spectrum_jit`` for backward compatibility
+  with the v1-C parity surface (which wraps the public function in
+  ``jax.jit`` directly — that pattern only works with the callback
+  path, since the setup orchestrator cannot itself be traced).
+  ``compute_transmission_spectrum_real_jit`` is the real-JAX entry
+  point.
 
 - ``compute_tau_vert_jax`` / ``trans_from_path_tau_jax`` — pure-``jnp``
   ports of the tensorial subroutines in ``transmission.py:533-630,
