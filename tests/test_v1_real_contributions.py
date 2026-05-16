@@ -22,19 +22,27 @@ from jaxposeidon._jax_contributions import (
 )
 
 
-def _fixture():
-    """Small realistic input set for active-molecule contribution."""
+def _fixture(N_sectors=1, N_zones=1, N_ff_pairs=0, P_deep=1000.0, include_active_cia=False):
+    """Small realistic input set for active-molecule contribution.
+
+    ``include_active_cia=True`` adds a CIA pair involving the active
+    species H2O (e.g. 'H2-H2O') to exercise the
+    `cia_mask | bulk_cia_mask` selector path. ``N_ff_pairs > 0``
+    exercises the free-free accumulation.
+    """
     rng = np.random.default_rng(0)
     N_layers = 20
     N_wl = 12
     N_T_fine = 8
     N_P_fine = 9
-    N_sectors = 1
-    N_zones = 1
 
     chemical_species = np.array(["H2", "He", "H2O", "CH4"])
     active_species = np.array(["H2O", "CH4"])
-    cia_pairs = np.array(["H2-H2", "H2-He"])
+    if include_active_cia:
+        cia_pairs = np.array(["H2-H2", "H2-He", "H2-H2O"])
+    else:
+        cia_pairs = np.array(["H2-H2", "H2-He"])
+    N_cia_pairs = len(cia_pairs)
 
     P = np.logspace(2.0, -7.0, N_layers)
     T = 1000.0 + 200.0 * rng.standard_normal((N_layers, N_sectors, N_zones))
@@ -48,28 +56,36 @@ def _fixture():
     X[3] = 1e-4
     X_active = X[2:]  # (N_species_active, N_layers, N_sectors, N_zones)
 
-    X_cia = np.zeros((2, 2, N_layers, N_sectors, N_zones))
+    X_cia = np.zeros((2, N_cia_pairs, N_layers, N_sectors, N_zones))
     X_cia[0, 0] = X[0]  # H2 in H2-H2
     X_cia[1, 0] = X[0]
     X_cia[0, 1] = X[0]  # H2 in H2-He
     X_cia[1, 1] = X[1]
+    if include_active_cia:
+        X_cia[0, 2] = X[0]  # H2 in H2-H2O
+        X_cia[1, 2] = X[2]  # H2O
 
-    X_ff = np.zeros((2, 0, N_layers, N_sectors, N_zones))
+    # ff_pairs (mock): give them arbitrary names that don't match species
+    ff_pairs = np.array([f"ff{q}" for q in range(N_ff_pairs)])
+    X_ff = np.zeros((2, N_ff_pairs, N_layers, N_sectors, N_zones))
+    for q in range(N_ff_pairs):
+        X_ff[0, q] = X[0] * 0.5
+        X_ff[1, q] = X[1] * 0.5
     X_bf = np.zeros((0, N_layers, N_sectors, N_zones))
 
     T_fine = np.linspace(500.0, 2000.0, N_T_fine)
     log_P_fine = np.linspace(-6.0, 2.0, N_P_fine)
     sigma_stored = rng.uniform(1e-23, 1e-21, (2, N_P_fine, N_T_fine, N_wl))
-    cia_stored = rng.uniform(1e-45, 1e-43, (2, N_T_fine, N_wl))
+    cia_stored = rng.uniform(1e-45, 1e-43, (N_cia_pairs, N_T_fine, N_wl))
     Rayleigh_stored = rng.uniform(1e-28, 1e-26, (4, N_wl))
-    ff_stored = np.zeros((0, N_T_fine, N_wl))
+    ff_stored = rng.uniform(1e-46, 1e-44, (N_ff_pairs, N_T_fine, N_wl))
     bf_stored = np.zeros((0, N_wl))
 
     return dict(
         chemical_species=chemical_species,
         active_species=active_species,
         cia_pairs=cia_pairs,
-        ff_pairs=np.array([], dtype=str),
+        ff_pairs=ff_pairs,
         bf_species=np.array([], dtype=str),
         aerosol_species=np.array([], dtype=str),
         n=n,
@@ -101,13 +117,27 @@ def _fixture():
         enable_Mie=0,
         n_aerosol_array=np.zeros((0, N_layers, N_sectors, N_zones)),
         sigma_Mie_array=np.zeros((0, N_wl)),
-        P_deep=1000.0,
+        P_deep=P_deep,
     )
 
 
-@pytest.mark.parametrize("contribution_species", ["H2O", "CH4"])
-def test_spectral_contribution_kernel_jit_parity_with_numpy(contribution_species):
-    cfg = _fixture()
+@pytest.mark.parametrize(
+    "label,contribution_species,fixture_kwargs",
+    [
+        ("H2O_1D_basic", "H2O", {}),
+        ("CH4_1D_basic", "CH4", {}),
+        ("H2O_with_active_cia_H2-H2O", "H2O", {"include_active_cia": True}),
+        ("H2O_with_ff_pairs", "H2O", {"N_ff_pairs": 2}),
+        ("H2O_multi_sector_2", "H2O", {"N_sectors": 2}),
+        ("H2O_multi_zone_2", "H2O", {"N_zones": 2}),
+        ("H2O_P_deep_inside_grid", "H2O", {"P_deep": 0.1}),
+        ("He_1D_basic", "He", {}),
+    ],
+)
+def test_spectral_contribution_kernel_jit_parity_with_numpy(
+    label, contribution_species, fixture_kwargs
+):
+    cfg = _fixture(**fixture_kwargs)
     kg_t, kR_t, _kc_t = _contributions.extinction_spectral_contribution(
         contribution_species=contribution_species,
         bulk_species=False,
@@ -138,8 +168,10 @@ def test_spectral_contribution_kernel_jit_parity_with_numpy(contribution_species
         jnp.asarray(cfg["X"]),
         jnp.asarray(cfg["X_active"]),
         jnp.asarray(cfg["X_cia"]),
+        jnp.asarray(cfg["X_ff"]),
         jnp.asarray(cfg["sigma_stored"]),
         jnp.asarray(cfg["cia_stored"]),
+        jnp.asarray(cfg["ff_stored"]),
         jnp.asarray(cfg["Rayleigh_stored"]),
         jnp.asarray(cfg["T_fine"]),
         jnp.asarray(cfg["log_P_fine"]),
@@ -148,6 +180,7 @@ def test_spectral_contribution_kernel_jit_parity_with_numpy(contribution_species
         jnp.asarray(cia_combined_mask),
         jnp.asarray(bulk_species_mask),
         is_He,
+        P_deep=cfg["P_deep"],
     )
 
     np.testing.assert_allclose(np.asarray(kg_o), kg_t, rtol=1e-13, atol=1e-50)
@@ -167,10 +200,13 @@ def test_spectral_contribution_kernel_jit_is_jit_traceable():
     cia_combined_mask = cia_mask | bulk_cia_mask
 
     @jax.jit
-    def _f(n, T, P, X, X_active, X_cia, sigma_stored, cia_stored, Rayleigh_stored):
+    def _f(
+        n, T, P, X, X_active, X_cia, X_ff,
+        sigma_stored, cia_stored, ff_stored, Rayleigh_stored,
+    ):
         return spectral_contribution_kernel_jit(
-            n, T, P, X, X_active, X_cia,
-            sigma_stored, cia_stored, Rayleigh_stored,
+            n, T, P, X, X_active, X_cia, X_ff,
+            sigma_stored, cia_stored, ff_stored, Rayleigh_stored,
             jnp.asarray(cfg["T_fine"]), jnp.asarray(cfg["log_P_fine"]),
             csi, cai,
             jnp.asarray(cia_combined_mask), jnp.asarray(bulk_species_mask),
@@ -184,8 +220,10 @@ def test_spectral_contribution_kernel_jit_is_jit_traceable():
         jnp.asarray(cfg["X"]),
         jnp.asarray(cfg["X_active"]),
         jnp.asarray(cfg["X_cia"]),
+        jnp.asarray(cfg["X_ff"]),
         jnp.asarray(cfg["sigma_stored"]),
         jnp.asarray(cfg["cia_stored"]),
+        jnp.asarray(cfg["ff_stored"]),
         jnp.asarray(cfg["Rayleigh_stored"]),
     )
     assert kg.shape == (20, 1, 1, 12)
@@ -216,8 +254,10 @@ def test_grad_through_jit_spectral_contribution_kernel_kappa_via_X_active():
             jnp.asarray(cfg["X"]),
             X_active,
             jnp.asarray(cfg["X_cia"]),
+            jnp.asarray(cfg["X_ff"]),
             jnp.asarray(cfg["sigma_stored"]),
             jnp.asarray(cfg["cia_stored"]),
+            jnp.asarray(cfg["ff_stored"]),
             jnp.asarray(cfg["Rayleigh_stored"]),
             jnp.asarray(cfg["T_fine"]),
             jnp.asarray(cfg["log_P_fine"]),
@@ -254,8 +294,10 @@ def test_make_jaxpr_spectral_contribution_kernel_succeeds():
             jnp.asarray(cfg["X"]),
             X_active,
             jnp.asarray(cfg["X_cia"]),
+            jnp.asarray(cfg["X_ff"]),
             jnp.asarray(cfg["sigma_stored"]),
             jnp.asarray(cfg["cia_stored"]),
+            jnp.asarray(cfg["ff_stored"]),
             jnp.asarray(cfg["Rayleigh_stored"]),
             jnp.asarray(cfg["T_fine"]),
             jnp.asarray(cfg["log_P_fine"]),

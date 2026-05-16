@@ -34,10 +34,15 @@ def _closest_index_jit(value, grid_start, grid_end, N_grid):
 
     Numerically equivalent to the numpy reference for finite,
     in-range values; clips below/above the grid to the boundary
-    indices (matching POSEIDON's Python-branch behaviour).
+    indices (matching POSEIDON's Python-branch behaviour). N_grid==1
+    is handled explicitly to avoid divide-by-zero on a degenerate
+    grid (POSEIDON's branch returns 0 in that case).
     """
     # POSEIDON formula: idx = round((value - grid_start) / dgrid)
     # for uniform grid; clip to [0, N_grid - 1].
+    # N_grid == 1 is degenerate (zero-width grid); POSEIDON returns 0.
+    if N_grid == 1:
+        return jnp.int32(0)
     dgrid = (grid_end - grid_start) / (N_grid - 1)
     idx = jnp.round((value - grid_start) / dgrid).astype(jnp.int32)
     return jnp.clip(idx, 0, N_grid - 1)
@@ -63,11 +68,17 @@ def setup_spectral_contribution_indices(
     N_bulk_species = N_species - N_species_active
     bulk_species_names = chemical_species[:N_bulk_species]
 
-    contribution_species_idx = -1
+    # Match POSEIDON `_contributions.py:126-127`: both indices default to 0
+    # when contribution_species is not found in the respective list.
+    # The downstream selectors zero-out the contribution via masks, so
+    # the index value at -1/0 is irrelevant for correctness; we use 0
+    # to match POSEIDON's silent default and avoid surprising `[-1]`
+    # gathers.
+    contribution_species_idx = 0
     for i in range(N_species):
         if contribution_species == chemical_species[i]:
             contribution_species_idx = i
-    contribution_active_idx = -1
+    contribution_active_idx = 0
     for i in range(N_species_active):
         if contribution_species == active_species[i]:
             contribution_active_idx = i
@@ -102,8 +113,10 @@ def spectral_contribution_kernel_jit(
     X,
     X_active,
     X_cia,
+    X_ff,
     sigma_stored,
     cia_stored,
+    ff_stored,
     Rayleigh_stored,
     T_fine,
     log_P_fine,
@@ -125,8 +138,10 @@ def spectral_contribution_kernel_jit(
     ``X`` ``(N_species, N_layers, N_sectors, N_zones)``;
     ``X_active`` ``(N_species_active, N_layers, N_sectors, N_zones)``;
     ``X_cia`` ``(2, N_cia_pairs, N_layers, N_sectors, N_zones)``;
+    ``X_ff`` ``(2, N_ff_pairs, N_layers, N_sectors, N_zones)``;
     ``sigma_stored`` ``(N_species_active, N_P_fine, N_T_fine, N_wl)``;
     ``cia_stored`` ``(N_cia_pairs, N_T_fine, N_wl)``;
+    ``ff_stored`` ``(N_ff_pairs, N_T_fine, N_wl)``;
     ``Rayleigh_stored`` ``(N_species, N_wl)``.
 
     Returns ``(kappa_gas, kappa_Ray)`` of shape
@@ -137,6 +152,13 @@ def spectral_contribution_kernel_jit(
     Bit-exact with POSEIDON for the active-molecule branch
     (``bulk_species=False``, ``cloud_contribution=False``,
     ``bound_free=False``).
+
+    ``jax.grad`` flows through ``X``, ``X_active``, ``X_cia``,
+    ``X_ff``, ``Rayleigh_stored``, ``cia_stored``, ``sigma_stored``,
+    ``ff_stored``, and ``n``. It does NOT flow through ``T`` or
+    ``P`` — those only feed the integer nearest-index lookups
+    (``idx_T_fine``, ``idx_P_fine``, ``i_bot``) which have no
+    continuous derivative signal.
     """
     N_layers = P.shape[0]
     N_sectors = n.shape[1]
@@ -181,6 +203,19 @@ def spectral_contribution_kernel_jit(
     cia_at_idx = cia_stored[q_idx, t_idx, :]  # (N_cia, N_layers, N_s, N_z, N_wl)
     kappa_gas_cia = jnp.sum(n_n_cia[..., None] * cia_at_idx, axis=0)  # (N_layers, N_s, N_z, N_wl)
 
+    # --- Free-free accumulation (POSEIDON _contributions.py:184-188) ---
+    # n_n_ff[q, i, j, k] = n[i,j,k]^2 * X_ff[0,q,i,j,k] * X_ff[1,q,i,j,k]
+    # — unconditionally added (no selector); zero-N_ff_pairs is handled
+    # by jnp.sum over an empty axis returning 0.
+    N_ff = ff_stored.shape[0]
+    if N_ff > 0:
+        n_n_ff = n_sq[None, :, :, :] * X_ff[0] * X_ff[1]  # (N_ff_pairs, N_layers, N_s, N_z)
+        q_idx_ff = jnp.arange(N_ff)[:, None, None, None]
+        ff_at_idx = ff_stored[q_idx_ff, t_idx, :]  # (N_ff_pairs, N_layers, N_s, N_z, N_wl)
+        kappa_gas_ff = jnp.sum(n_n_ff[..., None] * ff_at_idx, axis=0)
+    else:
+        kappa_gas_ff = jnp.zeros_like(kappa_gas_cia)
+
     # --- Active-species accumulation ---
     # Only the species at contribution_active_idx contributes (and not when is_He).
     # n_q[i,j,k] = n[i,j,k] * X_active[contribution_active_idx, i, j, k]
@@ -202,7 +237,7 @@ def spectral_contribution_kernel_jit(
         n_active[..., None] * sigma_at_PT
     )
 
-    kappa_gas = (kappa_gas_cia + kappa_gas_active) * layer_mask_4d
+    kappa_gas = (kappa_gas_cia + kappa_gas_ff + kappa_gas_active) * layer_mask_4d
 
     # --- Rayleigh accumulation ---
     # For the active-molecule branch: contribution species + bulk species both add.
