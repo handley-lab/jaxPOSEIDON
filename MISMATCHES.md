@@ -352,27 +352,29 @@ merge):
 | `_retrieval.py` | 1 | The `make_loglikelihood` closure currently uses `np.array([])` for empty parameter blocks; replace with `jnp.array([])` and ensure the closure returns under `jax.jit` for the full top-level `logp(unit_cube)` gate. |
 | `_transmission.py` | 1 | Full pure-`jnp` TRIDENT port (replaces the v1-C `pure_callback` shim — POSEIDON `transmission.py:289-944`). Out-of-scope for v1.0.0 per documented v1-C deferral. |
 
-### v1-C pure_callback lift (deferred to v1.0.x)
+### v1-C pure_callback lift — PARTIALLY shipped in v1.0.x real-JAX TRIDENT PR
 
-The `_jax_transmission.TRIDENT_callback` (v1-C) routes through
-`jax.pure_callback`, which is opaque to `jax.grad`. The v1-E plan
-called for refactoring the TRIDENT geometric setup
-(`extend_rad_transfer_grids` → `path_distribution_geometric`,
-POSEIDON `transmission.py:289-529, 87-285`) into fixed-buffer
-`lax.cond` / `lax.fori_loop` / `vmap` so `jax.grad` flows through.
+**Status (2026-05-16)**: A partial lift is shipped. The setup-only
+geometric prep stays in numpy (`_jax_transmission_setup.py`); the
+post-geometry tensor compute is pure-jnp (`TRIDENT_kernel_jit`); the
+public real-JAX entry point is
+`compute_transmission_spectrum_real_jit`. `jax.grad` flows through
+opacity tensors (`kappa_gas`, `kappa_Ray`, `kappa_cloud`)
+end-to-end. **`jax.grad` does NOT flow through geometry-dependent
+inputs** (`dr`, `r`, `r_up`, `r_low`, `f_cloud`, `phi_0`, `theta_0`,
+`enable_deck`, `enable_haze`, `b_p`, `y_p`, `R_s`) — these flow
+through numpy setup which is not traceable.
 
-The geometric setup produces array shapes (`N_phi`, `N_zones`,
-`theta_edge_all`) that depend on scalar inputs (`f_cloud`, `phi_0`,
-`theta_0`, `enable_deck`) through `np.append` / `np.sort` /
-`np.unique`. A line-for-line lax-rewrite with fixed-maximum padding is
-feasible but is a multi-day refactor that did not fit alongside the
-end-to-end gate landing. The grad-flow test would be a new
-`tests/test_v1_E_end_to_end.py::test_grad_through_pure_jnp_TRIDENT`
-once the pure-`jnp` `TRIDENT_jit` is ready.
+The legacy `compute_transmission_spectrum_jit` (which routes through
+`TRIDENT_callback` / `jax.pure_callback`) is retained for the
+v1-C-style "wrap the whole public function in `jax.jit`" usage
+pattern (used by `tests/test_v1_C_trident.py`).
 
-Tracked as v1.0.x follow-up; the pure-`jnp` `compute_tau_vert_jax` and
-`trans_from_path_tau_jax` kernels are already in `_jax_transmission.py`
-as the foundation.
+Tracked as v1.x follow-up: full lax-padded geometric setup so
+gradient flows through morphology/radius inputs too. This requires
+fixing `N_phi_max` / `N_zones_max` upper bounds + mask-based
+selection in `extend_rad_transfer_grids` and
+`path_distribution_geometric`.
 
 ### v1-B 2D/3D / Mie deferred sub-items (carried to v1.0.x)
 

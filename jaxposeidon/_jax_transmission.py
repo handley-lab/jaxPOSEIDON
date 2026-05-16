@@ -7,10 +7,16 @@ Two entry points to the TRIDENT chord transmission RT
   half of TRIDENT (``transmission.py:476-492``): computes ``tau_vert``,
   ``Trans = exp(-einsum(Path, tau_vert))``, and
   ``transit_depth = (A_overlap - <Trans, dA>) / (π R_s²)``. **All
-  inputs are precomputed-geometry tensors**; the kernel is fully
-  ``jit``-able and ``jax.grad`` flows through ``kappa_clear``,
-  ``kappa_cloud``, ``dr``, ``Path``, ``dA_atm_overlap``, and
-  ``A_overlap``.
+  geometry inputs are precomputed tensors**; the kernel is fully
+  ``jit``-able and ``jax.grad`` flows through the opacity tensors
+  ``kappa_clear`` and ``kappa_cloud``. ``dr`` is also a kernel input
+  and ``jax.grad`` flows through it **at the kernel level**; however,
+  the public wrapper ``TRIDENT_real_jit`` calls ``setup_TRIDENT_geometry``
+  with the same ``dr``, and ``dr`` participates in numpy setup
+  (``Path``, ``dA_atm_overlap`` depend on ``b/db = dr[...]``), so
+  end-to-end ``jax.grad`` through ``dr`` via the public wrapper is
+  NOT supported — that requires lifting the geometric setup into
+  pure-JAX (a v1.x follow-up).
 
 - ``setup_TRIDENT_geometry`` — numpy setup-only orchestrator that
   runs ``extend_rad_transfer_grids`` + ``path_distribution_geometric``

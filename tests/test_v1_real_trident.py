@@ -87,8 +87,8 @@ def _build_test_inputs(
     [
         ("1D_cloud_free", {}),
         ("1D_enable_deck", {"enable_deck": 1, "f_cloud": 0.4, "theta_0": -45.0, "phi_0": 30.0, "cloud_kappa": 1e-7}),
-        ("1D_enable_haze", {"enable_haze": 1, "cloud_kappa": 1e-7}),
-        ("1D_nonzero_y_p", {"y_p": 2e7}),
+        ("1D_enable_haze", {"enable_haze": 1, "f_cloud": 0.5, "phi_0": 30.0, "theta_0": -60.0, "cloud_kappa": 1e-7}),
+        ("1D_nonzero_y_p_near_limb", {"y_p": 6.5e8}),
         ("2D_patchy_cloud_dim2", {"f_cloud": 0.3, "phi_0": 60.0, "theta_0": -30.0, "cloud_kappa": 5e-7, "enable_deck": 1}),
         ("multi_zone_2", {"N_zones": 2}),
         ("multi_sector_2", {"N_sectors": 2}),

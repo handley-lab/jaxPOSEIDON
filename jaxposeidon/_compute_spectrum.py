@@ -721,21 +721,26 @@ def compute_transmission_spectrum_real_jit(
     phi_edge,
     theta_edge,
 ):
-    """Real-JAX transmission entry point — ``jax.grad`` flows through.
+    """Real-JAX transmission entry point — ``jax.grad`` flows through opacity.
 
     Numpy geometry setup (``_jax_transmission_setup.setup_TRIDENT_geometry``)
     runs **outside** the jit boundary; the post-setup tensor compute
-    (``TRIDENT_kernel_jit``) runs under jit in pure jnp. ``jax.grad``
-    flows through ``kappa_gas``, ``kappa_Ray``, ``kappa_cloud``, ``dr``.
+    (``TRIDENT_kernel_jit``) runs under jit in pure jnp. **``jax.grad``
+    flows through ``kappa_gas``, ``kappa_Ray``, and ``kappa_cloud``**
+    end-to-end.
 
-    Cloud-morphology parameters (``f_cloud``, ``phi_cloud_0``,
-    ``theta_cloud_0``, ``enable_deck``, ``enable_haze``, ``b_p``,
-    ``y_p``, ``R_s``) must be **Python scalars** (concrete values).
-    They drive output-shape decisions in the geometric setup and
-    therefore cannot themselves be traced — they are setup-only.
+    Inputs that participate in numpy geometry setup (``dr``, ``r``,
+    ``r_up``, ``r_low``, plus cloud-morphology / planet-geometry
+    scalars ``f_cloud``, ``phi_cloud_0``, ``theta_cloud_0``,
+    ``enable_deck``, ``enable_haze``, ``b_p``, ``y_p``, ``R_s``) must
+    be **Python scalars / numpy arrays** (concrete values). They
+    cannot be traced; end-to-end ``jax.grad`` through them is NOT
+    supported here. Lifting the geometric setup into pure-JAX is a
+    v1.x follow-up (see ``MISMATCHES.md`` → "TRIDENT — two paths
+    after v1.0.x real-JAX lift").
 
-    For samplers that need gradient through the physics parameters
-    (PT, X, kappa) while holding cloud morphology fixed, this is the
+    For samplers that need gradient through atmospheric opacity (PT,
+    X, kappa channels) while holding geometry fixed, this is the
     correct entry point. Do NOT wrap this function in ``jax.jit``;
     the kernel is internally jit-compiled.
     """
