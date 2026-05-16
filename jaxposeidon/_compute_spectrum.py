@@ -35,7 +35,7 @@ from jaxposeidon._emission import (  # noqa: E402
     emission_Toon,
     reflection_Toon,
 )
-from jaxposeidon._jax_transmission import TRIDENT_callback  # noqa: E402
+from jaxposeidon._jax_transmission import TRIDENT_callback, TRIDENT_real_jit  # noqa: E402
 from jaxposeidon._lbl import extinction_LBL  # noqa: E402
 from jaxposeidon._opacities import extinction  # noqa: E402
 from jaxposeidon._transmission import TRIDENT  # noqa: E402
@@ -661,7 +661,7 @@ def compute_transmission_spectrum_jit(
     phi_edge,
     theta_edge,
 ):
-    """JAX-traceable transmission entry point.
+    """JAX-traceable transmission entry point (pure_callback wrapper).
 
     Lifts the transmission branch of ``compute_spectrum``
     (POSEIDON `core.py:1303-2132`, transmission case) into a
@@ -669,7 +669,9 @@ def compute_transmission_spectrum_jit(
     delegated to ``TRIDENT_callback`` (a ``jax.pure_callback`` over
     the numpy ``_transmission.TRIDENT`` oracle), so bit-exact
     POSEIDON parity is preserved while the entry point is fully
-    traceable.
+    traceable under ``jax.jit``. **``jax.grad`` does NOT flow through
+    transmission via this path** — for gradient-bearing transmission
+    use ``compute_transmission_spectrum_real_jit`` below.
 
     Supports the single-``y_p`` (``y_p`` scalar) transmission case;
     ``transmission_time_average`` averaging stays on the numpy
@@ -693,6 +695,73 @@ def compute_transmission_spectrum_jit(
         jnp.asarray(f_cloud, dtype=jnp.float64),
         jnp.asarray(phi_cloud_0, dtype=jnp.float64),
         jnp.asarray(theta_cloud_0, dtype=jnp.float64),
+        phi_edge,
+        theta_edge,
+    )
+
+
+def compute_transmission_spectrum_real_jit(
+    P,
+    r,
+    r_up,
+    r_low,
+    dr,
+    wl,
+    kappa_gas,
+    kappa_Ray,
+    kappa_cloud,
+    enable_deck,
+    enable_haze,
+    b_p,
+    y_p,
+    R_s,
+    f_cloud,
+    phi_cloud_0,
+    theta_cloud_0,
+    phi_edge,
+    theta_edge,
+):
+    """Real-JAX transmission entry point — ``jax.grad`` flows through opacity.
+
+    Numpy geometry setup (``_jax_transmission_setup.setup_TRIDENT_geometry``)
+    runs **outside** the jit boundary; the post-setup tensor compute
+    (``TRIDENT_kernel_jit``) runs under jit in pure jnp. **``jax.grad``
+    flows through ``kappa_gas``, ``kappa_Ray``, and ``kappa_cloud``**
+    end-to-end.
+
+    Inputs that participate in numpy geometry setup (``dr``, ``r``,
+    ``r_up``, ``r_low``, plus cloud-morphology / planet-geometry
+    scalars ``f_cloud``, ``phi_cloud_0``, ``theta_cloud_0``,
+    ``enable_deck``, ``enable_haze``, ``b_p``, ``y_p``, ``R_s``) must
+    be **Python scalars / numpy arrays** (concrete values). They
+    cannot be traced; end-to-end ``jax.grad`` through them is NOT
+    supported here. Lifting the geometric setup into pure-JAX is a
+    v1.x follow-up (see ``MISMATCHES.md`` → "TRIDENT — two paths
+    after v1.0.x real-JAX lift").
+
+    For samplers that need gradient through atmospheric opacity (PT,
+    X, kappa channels) while holding geometry fixed, this is the
+    correct entry point. Do NOT wrap this function in ``jax.jit``;
+    the kernel is internally jit-compiled.
+    """
+    kappa_clear = kappa_gas + kappa_Ray
+    return TRIDENT_real_jit(
+        P,
+        r,
+        r_up,
+        r_low,
+        dr,
+        wl,
+        kappa_clear,
+        kappa_cloud,
+        enable_deck,
+        enable_haze,
+        b_p,
+        y_p,
+        R_s,
+        f_cloud,
+        phi_cloud_0,
+        theta_cloud_0,
         phi_edge,
         theta_edge,
     )
