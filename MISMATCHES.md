@@ -418,3 +418,15 @@ strict `1e-13` default). This is the same class of XLA-vs-numpy
 reduction-order residual as the v1-B FP-reorder entry; the tolerance
 is component-specific per the plan's "default rtol=1e-13, relax with
 explicit MISMATCHES entry" policy.
+
+### v1.0.x real-JAX high-res sysrem kernel — rtol relaxation
+
+`_jax_high_res.loglikelihood_sysrem_kernel_jit` matches the numpy
+`_high_res.loglikelihood_sysrem` reference at `rtol=1e-12` (relaxed
+from the v1 default `rtol=1e-13`). The kernel uses `vmap` over
+spectroscopic orders and `jnp.sum` over wavelength axes, which
+re-associates the floating-point sum order vs POSEIDON's nested
+Python `for j in range(nphi)` accumulation. On the
+`with_uncertainties_no_b` test fixture the residual is 1.8e-13
+relative — well within FP reorder noise but just over the strict
+`rtol=1e-13` gate. Documented per CLAUDE.md tolerance discipline.
