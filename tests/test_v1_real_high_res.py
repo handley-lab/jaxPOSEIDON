@@ -197,6 +197,27 @@ def test_grad_through_jit_loglikelihood_sysrem_via_planet_spectrum():
     assert jnp.any(g != 0.0)
 
 
+def test_loglikelihood_sysrem_emission_path_raises():
+    """The emission `use_star=True` path requires a per-frame
+    `flux_star` template that this kernel does not currently consume.
+    Honest NotImplementedError, not a silent wrong-answer."""
+    cfg = _fixture()
+    with pytest.raises(NotImplementedError, match="emission"):
+        loglikelihood_sysrem_kernel_jit(
+            jnp.float64(cfg["V_sys"]), jnp.float64(cfg["K_p"]),
+            jnp.float64(cfg["d_phi"]), jnp.float64(cfg["a"]),
+            jnp.float64(1.0),
+            jnp.asarray(cfg["wl"]), jnp.asarray(cfg["planet_spectrum"]),
+            jnp.asarray(cfg["wl_grid"]), jnp.asarray(cfg["residuals"]),
+            jnp.asarray(cfg["Bs"]), jnp.asarray(cfg["phi"]),
+            jnp.asarray(cfg["V_bary"]), jnp.asarray(cfg["uncertainties"]),
+            jnp.asarray(cfg["transit_weight"]),
+            jnp.asarray(cfg["planet_spectrum"]),
+            jnp.float64(cfg["max_transit_depth"]),
+            use_star=True, use_b=False, use_uncertainties=True,
+        )
+
+
 def test_make_jaxpr_loglikelihood_sysrem_succeeds():
     cfg = _fixture(with_uncertainties=True)
 
