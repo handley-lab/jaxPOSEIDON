@@ -48,62 +48,18 @@ def _closest_index_jit(value, grid_start, grid_end, N_grid):
     return jnp.clip(idx, 0, N_grid - 1)
 
 
-def setup_spectral_contribution_indices(
-    chemical_species,
-    active_species,
-    cia_pairs,
-    contribution_species,
-):
-    """Setup-only: resolve string-based selectors to integer indices.
+def setup_spectral_contribution_indices(*args, **kwargs):
+    """Back-compat shim — delegates to
+    ``_jax_contributions_setup.setup_spectral_contribution_indices``.
 
-    Returns ``(contribution_species_idx, contribution_active_idx,
-    cia_mask, bulk_cia_mask, bulk_species_mask)`` as plain numpy
-    arrays. Must run outside ``jit`` because it consumes string
-    arrays.
+    The actual implementation (numpy + string parsing) lives in the
+    allow-listed setup-only ``_jax_contributions_setup`` module.
     """
-    import numpy as np  # setup-only; allow-listed call path
-
-    N_species = len(chemical_species)
-    N_species_active = len(active_species)
-    N_bulk_species = N_species - N_species_active
-    bulk_species_names = chemical_species[:N_bulk_species]
-
-    # Match POSEIDON `_contributions.py:126-127`: both indices default to 0
-    # when contribution_species is not found in the respective list.
-    # The downstream selectors zero-out the contribution via masks, so
-    # the index value at -1/0 is irrelevant for correctness; we use 0
-    # to match POSEIDON's silent default and avoid surprising `[-1]`
-    # gathers.
-    contribution_species_idx = 0
-    for i in range(N_species):
-        if contribution_species == chemical_species[i]:
-            contribution_species_idx = i
-    contribution_active_idx = 0
-    for i in range(N_species_active):
-        if contribution_species == active_species[i]:
-            contribution_active_idx = i
-
-    cia_mask = np.zeros(len(cia_pairs), dtype=bool)
-    bulk_cia_mask = np.zeros(len(cia_pairs), dtype=bool)
-    for i in range(len(cia_pairs)):
-        pair_1, pair_2 = cia_pairs[i].split("-")
-        if contribution_species == pair_1 or contribution_species == pair_2:
-            cia_mask[i] = True
-        bulk1 = any(pair_1 == bs for bs in bulk_species_names)
-        bulk2 = any(pair_2 == bs for bs in bulk_species_names)
-        if bulk1 and bulk2:
-            bulk_cia_mask[i] = True
-
-    bulk_species_mask = np.zeros(N_species, dtype=bool)
-    bulk_species_mask[:N_bulk_species] = True
-
-    return (
-        contribution_species_idx,
-        contribution_active_idx,
-        cia_mask,
-        bulk_cia_mask,
-        bulk_species_mask,
+    from jaxposeidon._jax_contributions_setup import (
+        setup_spectral_contribution_indices as _setup,
     )
+
+    return _setup(*args, **kwargs)
 
 
 def spectral_contribution_kernel_jit(

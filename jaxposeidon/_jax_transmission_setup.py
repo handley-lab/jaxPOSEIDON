@@ -16,6 +16,54 @@ import numpy as np
 from jaxposeidon import _transmission
 
 
+def TRIDENT_callback_host(
+    P,
+    r,
+    r_up,
+    r_low,
+    dr,
+    wl,
+    kappa_clear,
+    kappa_cloud,
+    enable_deck,
+    enable_haze,
+    b_p,
+    y_p,
+    R_s,
+    f_cloud,
+    phi_0,
+    theta_0,
+    phi_edge,
+    theta_edge,
+):
+    """Host-side numpy TRIDENT call for the legacy ``jax.pure_callback``
+    wrapper in ``_jax_transmission.TRIDENT_callback``. Runs outside jit.
+
+    Setup-only / allow-listed; not jit-traceable.
+    """
+    out = _transmission.TRIDENT(
+        np.asarray(P),
+        np.asarray(r),
+        np.asarray(r_up),
+        np.asarray(r_low),
+        np.asarray(dr),
+        np.asarray(wl),
+        np.asarray(kappa_clear),
+        np.asarray(kappa_cloud),
+        int(np.asarray(enable_deck)),
+        int(np.asarray(enable_haze)),
+        float(np.asarray(b_p)),
+        float(np.asarray(y_p)),
+        float(np.asarray(R_s)),
+        float(np.asarray(f_cloud)),
+        float(np.asarray(phi_0)),
+        float(np.asarray(theta_0)),
+        np.asarray(phi_edge),
+        np.asarray(theta_edge),
+    )
+    return out.astype(np.float64)
+
+
 def setup_TRIDENT_geometry(
     P,
     r,

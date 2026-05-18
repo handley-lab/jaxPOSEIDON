@@ -45,8 +45,6 @@ import jax.numpy as jnp
 
 jax.config.update("jax_enable_x64", True)
 
-from jaxposeidon import _transmission  # noqa: E402
-
 
 def TRIDENT_callback(
     P,
@@ -77,54 +75,10 @@ def TRIDENT_callback(
     N_wl = wl.shape[0]
     result_shape = jax.ShapeDtypeStruct((N_wl,), jnp.float64)
 
-    def _cb(
-        P_,
-        r_,
-        r_up_,
-        r_low_,
-        dr_,
-        wl_,
-        kappa_clear_,
-        kappa_cloud_,
-        enable_deck_,
-        enable_haze_,
-        b_p_,
-        y_p_,
-        R_s_,
-        f_cloud_,
-        phi_0_,
-        theta_0_,
-        phi_edge_,
-        theta_edge_,
-    ):
-        # Host-side numpy is permitted inside the pure_callback body; not
-        # in the jit trace. Skip the v1 source-grep gate for this line.
-        import numpy as np  # v1-grep-skip
-
-        out = _transmission.TRIDENT(
-            np.asarray(P_),
-            np.asarray(r_),
-            np.asarray(r_up_),
-            np.asarray(r_low_),
-            np.asarray(dr_),
-            np.asarray(wl_),
-            np.asarray(kappa_clear_),
-            np.asarray(kappa_cloud_),
-            int(np.asarray(enable_deck_)),
-            int(np.asarray(enable_haze_)),
-            float(np.asarray(b_p_)),
-            float(np.asarray(y_p_)),
-            float(np.asarray(R_s_)),
-            float(np.asarray(f_cloud_)),
-            float(np.asarray(phi_0_)),
-            float(np.asarray(theta_0_)),
-            np.asarray(phi_edge_),
-            np.asarray(theta_edge_),
-        )
-        return out.astype(np.float64)
+    from jaxposeidon._jax_transmission_setup import TRIDENT_callback_host
 
     return jax.pure_callback(
-        _cb,
+        TRIDENT_callback_host,
         result_shape,
         P,
         r,
