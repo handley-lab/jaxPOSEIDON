@@ -334,77 +334,18 @@ def fit_uncertainties(flux, n_components=5, initial_guess=[0.1, 200], Print=True
     return PCA_rebuild(uncertainties, n_components=n_components)
 
 
-def prepare_high_res_data(
-    data_dir,
-    name,
-    spectrum_type,
-    method,
-    flux,
-    wl_grid,
-    phi,
-    uncertainties=None,
-    transit_weight=None,
-    V_bary=None,
-    pca_ncomp=4,
-    sysrem_niter=15,
-):
-    """Write `<data_dir>/<name>/data_processed.hdf5` per POSEIDON convention.
+def prepare_high_res_data(*args, **kwargs):
+    """Back-compat shim — delegates to ``_high_res_setup.prepare_high_res_data``.
 
-    Bit-equivalent port of POSEIDON `high_res.py:107-176`.
+    The actual implementation lives in the allow-listed setup-only
+    ``_high_res_setup`` module because it uses ``h5py.File`` for
+    one-off per-dataset output writing.
     """
-    if spectrum_type == "transmission":
-        if transit_weight is None:
-            raise Exception(
-                "Please provide transit_weight for transmission spectroscopy."
-            )
+    from jaxposeidon._high_res_setup import (
+        prepare_high_res_data as _prepare_high_res_data,
+    )
 
-    processed_data_path = os.path.join(data_dir, name, "data_processed.hdf5")
-
-    # v1-grep-skip: setup-only output writer; v1.0.x moves to _lbl_table_loader-style writer
-    _f_ctx = h5py.File(processed_data_path, "w")  # v1-grep-skip
-    with _f_ctx as f:
-        print(f"Creating processed data at {processed_data_path}")
-        f.create_dataset("phi", data=phi)
-        f.create_dataset("wl_grid", data=wl_grid)
-        if V_bary is not None:
-            f.create_dataset("V_bary", data=V_bary)
-
-        nord, nphi, npix = flux.shape
-
-        if spectrum_type == "emission":
-            if method.lower() == "pca":
-                _, residuals = make_data_cube(flux, pca_ncomp)
-            elif method.lower() == "sysrem":
-                residuals, Us = fast_filter(flux, uncertainties, sysrem_niter)
-                Bs = np.zeros((nord, nphi, nphi))
-                for i in range(nord):
-                    U = Us[i]
-                    L = np.diag(1 / np.mean(uncertainties[i], axis=-1))
-                    B = U @ np.linalg.pinv(L @ U) @ L
-                    Bs[i] = B
-                f.create_dataset("Bs", data=Bs)
-                f.create_dataset("uncertainties", data=uncertainties)
-            f.create_dataset("flux", data=flux)
-            f.create_dataset("residuals", data=residuals)
-
-        elif spectrum_type == "transmission":
-            if method.lower() == "sysrem":
-                median = fit_out_transit_spec(flux, transit_weight, spec="median")
-                flux /= median
-                uncertainties /= median
-                residuals, Us = fast_filter(flux, uncertainties, sysrem_niter)
-                Bs = np.zeros((nord, nphi, nphi))
-                for i in range(nord):
-                    U = Us[i]
-                    L = np.diag(1 / np.mean(uncertainties[i], axis=-1))
-                    B = U @ np.linalg.pinv(L @ U) @ L
-                    Bs[i] = B
-                f.create_dataset("Bs", data=Bs)
-                f.create_dataset("residuals", data=residuals)
-                f.create_dataset("uncertainties", data=uncertainties)
-                f.create_dataset("transit_weight", data=transit_weight)
-
-    return
+    return _prepare_high_res_data(*args, **kwargs)
 
 
 def loglikelihood_PCA(V_sys, K_p, d_phi, a, wl, planet_spectrum, star_spectrum, data):
