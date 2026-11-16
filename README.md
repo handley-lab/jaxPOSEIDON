@@ -54,13 +54,19 @@ export POSEIDON_input_data=/path/to/POSEIDON_input_data
 
 End-to-end `compute_spectrum` is validated on POSEIDON's full forward-model surface with 1,744 tests at `atol=1e-15, rtol=1e-13`, including a 396-case parametric sweep.
 
-### Realistic transmission spectrum
+### Synthetic active-species parity
 
-The configuration uses an H2/He background, a 1000 K isotherm, isochemical H2O at 1e-3, 50 pressure layers, and R=500 over 1–3 µm through the standard opacity-sampling code path. It is analogous to [POSEIDON's first transmission tutorial](https://poseidon-retrievals.readthedocs.io/en/latest/content/notebooks/transmission_basic.html).
+This compares `jaxposeidon.compute_spectrum` against upstream `POSEIDON.core.compute_spectrum` on an H2/He background with H2O as an active species through the opacity-sampling code path.
 
-![realistic H2/He + H2O validation](figures/parity_molecular_h2o.png)
+**The H2O cross section is synthetic**: `log10(sigma)` is sampled IID from `U(-23, -21)` on the `(nu, logP, T)` grid. It is not a HITRAN / HITEMP / ExoMol line list and does not reproduce POSEIDON's introductory transmission example.
+
+The configuration uses a 1000 K isotherm, isochem `X_H2O = 1e-4` (`log10 = -4.0`), 50 pressure layers, and R=500 over 1–3 µm. Full provenance (grid ranges, random seed, IID distribution, atmospheric and wavelength settings, and parity measurements) is in `benchmarks/synthetic_opacity_provenance.json`.
+
+![synthetic H2O opacity-sampling parity](figures/parity_synthetic_h2o.png)
 
 Max |residual| = 0 ppm across 549 wavelength points.
+
+This confirms the opacity-sampling data path end-to-end; it is not evidence of parity on a realistic molecular line list. A real-opacity validation needs the POSEIDON opacity database staged at `POSEIDON_input_data` and is not in this PR.
 
 ### Rayleigh + MacMad17 cloud geometry
 
@@ -78,35 +84,74 @@ Parity after instrument convolution and binning.
 
 Residual distribution across the 396-case parametric sweep.
 
-Reproduce with `python scripts/generate_{molecular_validation_figure,parity_figures,binning_figure,sweep_histogram}.py` — the first requires POSEIDON installed (see `benchmarks/README.md`).
+Reproduce with `python scripts/generate_{synthetic_opacity_parity_figure,parity_figures,binning_figure,sweep_histogram}.py` — the first requires POSEIDON installed (see `benchmarks/README.md`).
 
 ## Benchmarks
 
-Benchmarks run on turing (NVIDIA RTX PRO 6000 Blackwell Max-Q); jax 0.12.0.1, jaxlib 0.12.0.1, Python 3.12.13, numpy 2.5.5. The workload uses N_layers=60, N_wl=400, repeats=20, and `block_until_ready`. The first call is measured separately as compile+run. Artefacts are in `benchmarks/`.
+Measurements run on turing in the Slurm `gpu` partition with 1× NVIDIA RTX PRO 6000 Blackwell Max-Q. The environment uses jax 0.12.0.1, jaxlib 0.12.0.1, Python 3.12.13 and numpy 2.5.5.
 
-The benchmarked kernel is the real-JAX TRIDENT (`_jax_transmission.TRIDENT_kernel_jit`) added in PR #37. Geometry setup runs once in numpy outside the jit boundary and is not included in the per-spectrum cost.
+The workload has `N_layers = 60` and `N_wl = 400`, with 20 repeats for the GPU run and 10 for the CPU run. Each JAX call is followed by `block_until_ready()`. The first call is recorded separately as compile+run.
 
-| mode | batch | per-spectrum | speedup vs numpy single |
-|---|---:|---:|---:|
-| numpy single        |    1 | 10063 µs | 1.0× |
-| jax CPU single      |    1 |   135.1 µs | 75× |
-| jax CPU batch=16    |   16 |    76.7 µs | 131× |
-| jax CPU batch=1024  | 1024 |    92.4 µs | 109× |
-| jax GPU single      |    1 |    59.6 µs | 169× |
-| jax GPU batch=16    |   16 |     8.4 µs | 1201× |
-| jax GPU batch=256   |  256 |     5.3 µs | 1886× |
-| jax GPU batch=4096  | 4096 |     4.9 µs | 2053× |
+The baselines use matched boundaries:
 
-Most of the GPU speedup comes from batching with vmap over opacity inputs. Single-spectrum CPU jit alone gives ~75×. The headline ~2000× is only reached at batch=4096 on GPU.
+- `poseidon_e2e`: upstream `POSEIDON.transmission.TRIDENT` (numba-JIT) on CPU, end-to-end including geometry setup. This is the code upstream ships.
+- `numpy_e2e`: `jaxposeidon._transmission.TRIDENT`, the local numpy port, end-to-end including geometry setup. It is a self-consistency check only, not representative of production POSEIDON, which uses numba.
+- `jax_e2e`: numpy `setup_TRIDENT_geometry` followed by JAX `TRIDENT_kernel_jit` with `block_until_ready()`. Geometry is recomputed each call, representing a sampler where cloud morphology varies.
+- `jax_kernel`: the JAX kernel only, with geometry precomputed once outside the timer, representing a sampler with fixed geometry (constant cloud / varying PT / X).
 
-The first-call compile+run cost is 34.7 ms on CPU and 7394 ms on GPU. This cost is amortised over subsequent calls with the same input shapes. Any sampler use needs the compile pattern reused across chain steps.
+Each batch element has unique random `kappa_clear` / `kappa_cloud` arrays; batches do not broadcast an identical spectrum. Comparing `jax_kernel` with `poseidon_e2e` for a single spectrum gives `max |residual| = 0.000e+00 ppm`, bit-exact in float64.
 
-The per-spectrum cost excludes the numpy geometry setup (atmosphere construction + `setup_TRIDENT_geometry`), which runs once per parameter set. For a sampler closure that varies cloud morphology each step, that setup cost is in the loop.
+### CPU results
 
-![benchmarks](figures/benchmarks.png)
+Times are µs per spectrum, reported as medians over 10 repeats on turing with `--cpus-per-task=4` and `JAX_PLATFORMS=cpu`.
 
-Reproduce with `sbatch benchmarks/bench_turing.sbatch` on a Slurm GPU host; `python scripts/bench_trident.py --out <path>.json` for a single-host CPU-only run.
+| batch | poseidon_e2e | numpy_e2e | jax_e2e | jax_kernel |
+|---:|---:|---:|---:|---:|
+| 1 | — (warmup noise) | 11 501 | 6 667 | 156 |
+| 4 | 280 | 10 098 | 1 794 | 97 |
+| 16 | 285 | 10 128 | 509 | 89 |
+| 64 | 278 | 10 253 | 201 | 115 |
+| 256 | skipped | skipped | 126 | 97 |
+| 1024 | skipped | skipped | 102 | 99 |
 
+### GPU results
+
+Times are µs per spectrum, reported as medians over 20 repeats on turing with `--gres=gpu:1`. The `poseidon_e2e` and `numpy_e2e` references run on the host CPU of the same node.
+
+| batch | poseidon_e2e (CPU) | numpy_e2e (CPU) | jax_e2e (GPU) | jax_kernel (GPU) |
+|---:|---:|---:|---:|---:|
+| 1 | 331 | 11 533 | 7 485 | 77.2 |
+| 4 | 295 | 10 200 | 1 800 | 25.5 |
+| 16 | 290 | 10 277 | 472 | 9.9 |
+| 64 | 293 | 10 179 | 123 | 6.6 |
+| 256 | skipped | skipped | 34.6 | 5.4 |
+| 1024 | skipped | skipped | 12.5 | 5.2 |
+| 4096 | skipped | skipped | 6.9 | 5.1 |
+
+### Compile and first-call costs
+
+First-call costs are recorded separately and amortised across subsequent calls with the same shapes.
+
+- CPU `jax_e2e`: approximately 70 ms; CPU `jax_kernel`: approximately 50 ms.
+- GPU `jax_e2e`: approximately 13.8 s (XLA compile); GPU `jax_kernel`: approximately 130 ms.
+- POSEIDON numba warmup: approximately 0.5–20 ms depending on batch; numba caches after warmup.
+
+### Interpretation
+
+The throughput advantage is in the kernel-only measurement. At batch = 4096, GPU `jax_kernel` takes 5.1 µs per spectrum, compared with approximately 293 µs per spectrum for upstream POSEIDON on CPU: approximately 57× higher throughput for the sampler pattern where geometry is fixed and only opacity varies between steps.
+
+At batch = 1, recomputing geometry each call makes GPU `jax_e2e` slower than upstream POSEIDON on CPU (7.5 ms versus 0.33 ms). GPU execution wins only when the kernel work is large enough to pay for device transfers; batching is the intended inference pattern.
+
+The numpy port is approximately 35× slower than upstream POSEIDON at batch = 16 because upstream uses numba. `numpy_e2e` serves as a self-consistency reference, not a substitute for the upstream baseline. The `jax_kernel` output matches `poseidon_e2e` at bit-level precision in float64, with max |residual| = 0 ppm on the compared batch element.
+
+### Reproducing
+
+- Slurm: `sbatch benchmarks/bench_turing.sbatch` runs CPU then GPU, using 10 CPU repeats and 20 GPU repeats. Both pass `--numpy-max-batch 64` to avoid the slow numpy-port baseline on large batches.
+- One-off: `python scripts/bench_trident.py --out run.json --repeats 20 --batches 1 4 16 64 256 1024 --numpy-max-batch 64`. Set `JAX_PLATFORMS=cpu` to force CPU execution.
+- Raw results: `benchmarks/bench_turing_cpu.json` and `benchmarks/bench_turing_gpu.json`; full Slurm log: `benchmarks/slurm-7469.out`.
+- The `jax_e2e` timings depend on hitting the jit cache: the benchmark hoists the jit outside the per-call closure. Re-creating the jit each call incurs compilation at every step.
+
+The production headline is kernel-only batched throughput on GPU; end-to-end execution with per-call geometry recomputation shows no GPU win at batch = 1 and begins paying off around batch = 16, while upstream POSEIDON remains the appropriate single-spectrum CPU baseline.
 ## Scope (v0.5)
 
 v0.5 covers POSEIDON's full forward-model surface at numpy/scipy parity.
