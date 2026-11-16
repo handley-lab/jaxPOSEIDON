@@ -3,7 +3,7 @@
 [![CI](https://github.com/handley-lab/jaxPOSEIDON/actions/workflows/ci.yml/badge.svg)](https://github.com/handley-lab/jaxPOSEIDON/actions/workflows/ci.yml)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 
-Extending [POSEIDON](https://github.com/MartianColonist/POSEIDON) to [JAX](https://jax.readthedocs.io/). POSEIDON is the open-source heir to AURA — the canonical numerical engine for exoplanet atmospheric retrievals in the Madhusudhan-tradition pipeline. jaxPOSEIDON reuses POSEIDON's embodied numerical intelligence (opacity preprocessing, TRIDENT chord radiative transfer, MacMad17 cloud geometry, instrument convolution) and validates against POSEIDON to floating-point precision, in service of [BlackJAX nested slice sampling](https://github.com/handley-lab/blackjax) for differentiable, GPU-ready Bayesian inference.
+jaxPOSEIDON is an experimental JAX reimplementation of [POSEIDON](https://github.com/MartianColonist/POSEIDON)'s forward model components: opacity preprocessing, TRIDENT chord radiative transfer, MacMad17 cloud geometry and instrument convolution. POSEIDON was introduced by MacDonald & Madhusudhan (2017). It predates AURA, an independent code introduced by Pinhas et al. (2018). jaxPOSEIDON validates against POSEIDON across 1,744 tests at `atol=1e-15`, `rtol=1e-13`. It supports [BlackJAX nested slice sampling](https://github.com/handley-lab/blackjax) for differentiable, GPU-ready Bayesian inference.
 
 ## Usage
 
@@ -52,29 +52,60 @@ export POSEIDON_input_data=/path/to/POSEIDON_input_data
 
 ## Numerical validation
 
-POSEIDON is the numerical oracle. 1,744 tests assert equivalence
-against POSEIDON across the supported configuration surface, including
-a 396-case forward-model parametric sweep over atmosphere and cloud
-parameters at `atol=1e-15, rtol=1e-13` — comfortably inside the plan's
-≤1 ppm target on the binned observable. The canonical Rayleigh oracle
-matches POSEIDON bit-for-bit.
+End-to-end `compute_spectrum` is validated on POSEIDON's full forward-model surface with 1,744 tests at `atol=1e-15, rtol=1e-13`, including a 396-case parametric sweep.
 
-Six representative configurations — POSEIDON dashed, jaxPOSEIDON solid,
-residual in ppm on the right:
+### Realistic transmission spectrum
+
+The configuration uses an H2/He background, a 1000 K isotherm, isochemical H2O at 1e-3, 50 pressure layers, and R=500 over 1–3 µm through the standard opacity-sampling code path. It is analogous to [POSEIDON's first transmission tutorial](https://poseidon-retrievals.readthedocs.io/en/latest/content/notebooks/transmission_basic.html).
+
+![realistic H2/He + H2O validation](figures/parity_molecular_h2o.png)
+
+Max |residual| = 0 ppm across 549 wavelength points.
+
+### Rayleigh + MacMad17 cloud geometry
+
+Six H2/He Rayleigh / MacMad17 cloud configurations probe cloud geometry and instrument convolution specifically. They do not represent physical atmospheres with molecular absorption and do not provide exhaustive validation.
 
 ![spectra parity](figures/parity_spectra.png)
 
-End-to-end through the instrument model on a JWST NIRSpec PRISM-style
-40-bin layout (max binned residual = 0 ppm):
+Spectral parity across the six Rayleigh / MacMad17 cloud configurations.
 
 ![binned parity](figures/parity_binned.png)
 
-Distribution of max-per-case |Δ(transit depth)| across the 396-case
-sweep — 395 bit-exact, one case at 1.7×10⁻¹² ppm:
+Parity after instrument convolution and binning.
 
 ![sweep histogram](figures/sweep_histogram.png)
 
-Reproduce with `python scripts/generate_{parity_figures,binning_figure,sweep_histogram}.py`.
+Residual distribution across the 396-case parametric sweep.
+
+Reproduce with `python scripts/generate_{molecular_validation_figure,parity_figures,binning_figure,sweep_histogram}.py` — the first requires POSEIDON installed (see `benchmarks/README.md`).
+
+## Benchmarks
+
+Benchmarks run on turing (NVIDIA RTX PRO 6000 Blackwell Max-Q); jax 0.12.0.1, jaxlib 0.12.0.1, Python 3.12.13, numpy 2.5.5. The workload uses N_layers=60, N_wl=400, repeats=20, and `block_until_ready`. The first call is measured separately as compile+run. Artefacts are in `benchmarks/`.
+
+The benchmarked kernel is the real-JAX TRIDENT (`_jax_transmission.TRIDENT_kernel_jit`) added in PR #37. Geometry setup runs once in numpy outside the jit boundary and is not included in the per-spectrum cost.
+
+| mode | batch | per-spectrum | speedup vs numpy single |
+|---|---:|---:|---:|
+| numpy single        |    1 | 10063 µs | 1.0× |
+| jax CPU single      |    1 |   135.1 µs | 75× |
+| jax CPU batch=16    |   16 |    76.7 µs | 131× |
+| jax CPU batch=1024  | 1024 |    92.4 µs | 109× |
+| jax GPU single      |    1 |    59.6 µs | 169× |
+| jax GPU batch=16    |   16 |     8.4 µs | 1201× |
+| jax GPU batch=256   |  256 |     5.3 µs | 1886× |
+| jax GPU batch=4096  | 4096 |     4.9 µs | 2053× |
+
+Most of the GPU speedup comes from batching with vmap over opacity inputs. Single-spectrum CPU jit alone gives ~75×. The headline ~2000× is only reached at batch=4096 on GPU.
+
+The first-call compile+run cost is 34.7 ms on CPU and 7394 ms on GPU. This cost is amortised over subsequent calls with the same input shapes. Any sampler use needs the compile pattern reused across chain steps.
+
+The per-spectrum cost excludes the numpy geometry setup (atmosphere construction + `setup_TRIDENT_geometry`), which runs once per parameter set. For a sampler closure that varies cloud morphology each step, that setup cost is in the loop.
+
+![benchmarks](figures/benchmarks.png)
+
+Reproduce with `sbatch benchmarks/bench_turing.sbatch` on a Slurm GPU host; `python scripts/bench_trident.py --out <path>.json` for a single-host CPU-only run.
 
 ## Scope (v0.5)
 
