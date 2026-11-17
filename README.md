@@ -54,6 +54,16 @@ export POSEIDON_input_data=/path/to/POSEIDON_input_data
 
 End-to-end `compute_spectrum` is validated on POSEIDON's full forward-model surface with 1,744 tests at `atol=1e-15, rtol=1e-13`, including a 396-case parametric sweep.
 
+### Realistic first-transmission-tutorial parity
+
+This test reproduces upstream POSEIDON's first transmission tutorial verbatim (`POSEIDON/docs/content/notebooks/transmission_basic.ipynb`) and compares `jaxposeidon.compute_spectrum` with `POSEIDON.core.compute_spectrum` on the real opacity database. The HAT-P-26b-like configuration uses a star with `R_s = 0.87 R_Sun`, `T_s = 5079 K`, `log_g_s = 4.56` and `[Fe/H] = -0.04`, and a planet with `R_p = 0.63 R_J`, `M_p = 0.07 M_J`, `g_p = 4.3712 m/s^2` and `T_eq = 1043.8 K`. The cloud-free, isothermal model has bulk species `[H2, He]`, trace species `[H2O, CH4]`, `T = 1000 K`, `log10 X_H2O = -3.3` (`X_H2O ≈ 5.01e-4`) and `log10 X_CH4 = -5.0`; its 100 pressure layers span `logspace(100 bar, 1e-7 bar)`, with `P_ref = 10 bar` and `R_p_ref = R_p`. It uses `wl_grid_constant_R(0.6, 5.2, 10000)` (21595 wavelength points), `T_fine = arange(400, 2010, 10)` K (161 points), `log_P_fine = arange(-6.0, 2.2, 0.2)` (41 points) and `opacity_treatment = opacity_sampling`. The forward model runs `jaxposeidon._jax_transmission.TRIDENT_kernel_jit`; the test script asserts that the returned spectrum is finite, strictly positive and produced via the JAX kernel.
+
+![Realistic first-transmission-tutorial parity](figures/parity_realistic_tutorial.png)
+
+Result: `max |residual| = 0.000e+00` ppm and `median |residual| = 0` ppm across 21595 wavelength points, with a maximum POSEIDON transit depth of approximately 12405 ppm; the rtol-equivalent and pointwise maximum rtol are both 0. On this configuration, `jaxposeidon.compute_spectrum` is bit-exact to upstream `POSEIDON.core.compute_spectrum` in float64.
+
+`scripts/generate_realistic_tutorial_parity_figure.py` reproduces the comparison and records provenance in `benchmarks/realistic_tutorial_provenance.json`. It requires a staged input directory, specified by the `POSEIDON_input_data` environment variable and not vendored, containing the POSEIDON v1.3 inputs from Zenodo record [19595136](https://doi.org/10.5281/zenodo.19595136): `Opacity_database_v1.3.hdf5` (66 GB) and `Opacity_database_cia.hdf5` (49 MB). These contain real H2O/CH4 line opacity, H2-H2/H2-He/H2-CH4 CIA and Rayleigh scattering; the H2O nu grid spans 200–42000 cm^-1 and the temperature grid spans 100–3500 K. The comparison runs on turing with one NVIDIA RTX PRO 6000 Blackwell Max-Q in Slurm's `gpu` partition, using jax 0.12.0.1, jaxlib 0.12.0.1 and Python 3.12.13.
+
 ### Synthetic active-species parity
 
 This compares `jaxposeidon.compute_spectrum` against upstream `POSEIDON.core.compute_spectrum` on an H2/He background with H2O as an active species through the opacity-sampling code path.
@@ -84,7 +94,7 @@ Parity after instrument convolution and binning.
 
 Residual distribution across the 396-case parametric sweep.
 
-Reproduce with `python scripts/generate_{synthetic_opacity_parity_figure,parity_figures,binning_figure,sweep_histogram}.py` — the first requires POSEIDON installed (see `benchmarks/README.md`).
+Reproduce with `python scripts/generate_{realistic_tutorial_parity_figure,synthetic_opacity_parity_figure,parity_figures,binning_figure,sweep_histogram}.py` — the first two require POSEIDON installed, and the realistic one additionally requires `POSEIDON_input_data` pointed at a staged copy of the Zenodo v1.3 inputs (see `benchmarks/README.md`).
 
 ## Benchmarks
 

@@ -86,3 +86,20 @@ script that emits `figures/parity_synthetic_h2o.png` — parity of
 `jaxposeidon.compute_spectrum` against upstream POSEIDON on a
 synthetic H2O opacity (log sigma ~ U(-23, -21)). It is a data-path
 smoke, not a realistic-atmosphere validation.
+
+`realistic_tutorial_provenance.json` records the grid ranges, atmosphere settings
+and parity measurements for `scripts/generate_realistic_tutorial_parity_figure.py`.
+The script reproduces upstream POSEIDON's first transmission tutorial on HAT-P-26b
+with real H2O/CH4 line opacity from the v1.3 Zenodo inputs (record 19595136),
+yielding `max |residual| = 0` ppm across 21595 wavelength points against upstream
+`POSEIDON.core.compute_spectrum`.
+
+The realistic parity test requires `POSEIDON_input_data` to point at an unpacked
+`inputs/` directory containing `opacity/Opacity_database_v1.3.hdf5` (66 GB) and
+`opacity/Opacity_database_cia.hdf5` (49 MB). Fetch the inputs from Zenodo DOI
+[10.5281/zenodo.19595136](https://doi.org/10.5281/zenodo.19595136) (72 GB zip).
+Unzip with `UNZIP_DISABLE_ZIPBOMB_DETECTION=TRUE`, since the inputs zip hits
+unzip's heuristic.
+
+Produced on turing (Slurm `gpu` partition; 1x NVIDIA RTX PRO 6000 Blackwell Max-Q)
+with jax 0.12.0.1, jaxlib 0.12.0.1 and Python 3.12.13.
