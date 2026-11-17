@@ -1,0 +1,79 @@
+{
+  "poseidon_input_data": "/var/tmp/will/poseidon_inputs_2026-11-16/inputs",
+  "opacity_database_file": "/var/tmp/will/poseidon_inputs_2026-11-16/inputs/opacity/Opacity_database_v1.3.hdf5",
+  "zenodo_record": "https://doi.org/10.5281/zenodo.19595136",
+  "tutorial_source": "POSEIDON/docs/content/notebooks/transmission_basic.ipynb",
+  "star": {
+    "R_s_R_Sun": 0.87,
+    "T_s_K": 5079.0,
+    "log_g_s_cgs": 4.56,
+    "Met_s_dex": -0.04
+  },
+  "planet": {
+    "name": "HAT-P-26b",
+    "R_p_R_J": 0.63,
+    "M_p_M_J": 0.07,
+    "g_p_m_s2": 4.3712,
+    "T_eq_K": 1043.8
+  },
+  "model": {
+    "bulk_species": [
+      "H2",
+      "He"
+    ],
+    "param_species": [
+      "H2O",
+      "CH4"
+    ],
+    "PT_profile": "isotherm",
+    "cloud_model": "cloud-free"
+  },
+  "atmosphere": {
+    "P_min_bar": 1e-07,
+    "P_max_bar": 100.0,
+    "N_layers": 100,
+    "P_ref_bar": 10.0,
+    "T_K": 1000.0,
+    "log10_X_H2O": -3.3,
+    "log10_X_CH4": -5.0,
+    "X_H2O": 0.0005011872336272725,
+    "X_CH4": 1e-05
+  },
+  "wavelength_grid": {
+    "scheme": "wl_grid_constant_R",
+    "wl_min_um": 0.6,
+    "wl_max_um": 5.2,
+    "R": 10000,
+    "N_wl": 21595
+  },
+  "T_fine_K": {
+    "min": 400.0,
+    "max": 2000.0,
+    "step": 10.0,
+    "N": 161
+  },
+  "log_P_fine": {
+    "min": -6.0,
+    "max": 2.000000000000007,
+    "step": 0.20000000000000018,
+    "N": 41
+  },
+  "opacity_treatment": "opacity_sampling",
+  "opacity_database_h2o_nu_range_cm_inv": [
+    200.0,
+    42000.0
+  ],
+  "opacity_database_h2o_T_range_K": [
+    100.0,
+    3500.0
+  ],
+  "parity_measurements": {
+    "N_wl": 21595,
+    "max_abs_residual_ppm": 0.0,
+    "median_abs_residual_ppm": 0.0,
+    "poseidon_max_abs_depth_ppm": 12404.761420154153,
+    "rtol_equivalent": 0.0,
+    "rtol_pointwise": 0.0
+  },
+  "real_opacity_validation": true
+}

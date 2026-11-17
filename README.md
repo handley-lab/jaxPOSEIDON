@@ -3,7 +3,7 @@
 [![CI](https://github.com/handley-lab/jaxPOSEIDON/actions/workflows/ci.yml/badge.svg)](https://github.com/handley-lab/jaxPOSEIDON/actions/workflows/ci.yml)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 
-Extending [POSEIDON](https://github.com/MartianColonist/POSEIDON) to [JAX](https://jax.readthedocs.io/). POSEIDON is the open-source heir to AURA — the canonical numerical engine for exoplanet atmospheric retrievals in the Madhusudhan-tradition pipeline. jaxPOSEIDON reuses POSEIDON's embodied numerical intelligence (opacity preprocessing, TRIDENT chord radiative transfer, MacMad17 cloud geometry, instrument convolution) and validates against POSEIDON to floating-point precision, in service of [BlackJAX nested slice sampling](https://github.com/handley-lab/blackjax) for differentiable, GPU-ready Bayesian inference.
+jaxPOSEIDON is an experimental JAX reimplementation of [POSEIDON](https://github.com/MartianColonist/POSEIDON)'s forward model components: opacity preprocessing, TRIDENT chord radiative transfer, MacMad17 cloud geometry and instrument convolution. POSEIDON was introduced by MacDonald & Madhusudhan (2017). It predates AURA, an independent code introduced by Pinhas et al. (2018). jaxPOSEIDON validates against POSEIDON across 1,744 tests at `atol=1e-15`, `rtol=1e-13`. It supports [BlackJAX nested slice sampling](https://github.com/handley-lab/blackjax) for differentiable, GPU-ready Bayesian inference.
 
 ## Usage
 
@@ -52,30 +52,116 @@ export POSEIDON_input_data=/path/to/POSEIDON_input_data
 
 ## Numerical validation
 
-POSEIDON is the numerical oracle. 1,744 tests assert equivalence
-against POSEIDON across the supported configuration surface, including
-a 396-case forward-model parametric sweep over atmosphere and cloud
-parameters at `atol=1e-15, rtol=1e-13` — comfortably inside the plan's
-≤1 ppm target on the binned observable. The canonical Rayleigh oracle
-matches POSEIDON bit-for-bit.
+End-to-end `compute_spectrum` is validated on POSEIDON's full forward-model surface with 1,744 tests at `atol=1e-15, rtol=1e-13`, including a 396-case parametric sweep.
 
-Six representative configurations — POSEIDON dashed, jaxPOSEIDON solid,
-residual in ppm on the right:
+### Realistic first-transmission-tutorial parity
+
+This test reproduces upstream POSEIDON's first transmission tutorial verbatim (`POSEIDON/docs/content/notebooks/transmission_basic.ipynb`) and compares `jaxposeidon.compute_spectrum` with `POSEIDON.core.compute_spectrum` on the real opacity database. The HAT-P-26b-like configuration uses a star with `R_s = 0.87 R_Sun`, `T_s = 5079 K`, `log_g_s = 4.56` and `[Fe/H] = -0.04`, and a planet with `R_p = 0.63 R_J`, `M_p = 0.07 M_J`, `g_p = 4.3712 m/s^2` and `T_eq = 1043.8 K`. The cloud-free, isothermal model has bulk species `[H2, He]`, trace species `[H2O, CH4]`, `T = 1000 K`, `log10 X_H2O = -3.3` (`X_H2O ≈ 5.01e-4`) and `log10 X_CH4 = -5.0`; its 100 pressure layers span `logspace(100 bar, 1e-7 bar)`, with `P_ref = 10 bar` and `R_p_ref = R_p`. It uses `wl_grid_constant_R(0.6, 5.2, 10000)` (21595 wavelength points), `T_fine = arange(400, 2010, 10)` K (161 points), `log_P_fine = arange(-6.0, 2.2, 0.2)` (41 points) and `opacity_treatment = opacity_sampling`. The forward model runs `jaxposeidon._jax_transmission.TRIDENT_kernel_jit`; the test script asserts that the returned spectrum is finite, strictly positive and produced via the JAX kernel.
+
+![Realistic first-transmission-tutorial parity](figures/parity_realistic_tutorial.png)
+
+Result: `max |residual| = 0.000e+00` ppm and `median |residual| = 0` ppm across 21595 wavelength points, with a maximum POSEIDON transit depth of approximately 12405 ppm; the rtol-equivalent and pointwise maximum rtol are both 0. On this configuration, `jaxposeidon.compute_spectrum` is bit-exact to upstream `POSEIDON.core.compute_spectrum` in float64.
+
+`scripts/generate_realistic_tutorial_parity_figure.py` reproduces the comparison and records provenance in `benchmarks/realistic_tutorial_provenance.json`. It requires a staged input directory, specified by the `POSEIDON_input_data` environment variable and not vendored, containing the POSEIDON v1.3 inputs from Zenodo record [19595136](https://doi.org/10.5281/zenodo.19595136): `Opacity_database_v1.3.hdf5` (66 GB) and `Opacity_database_cia.hdf5` (49 MB). These contain real H2O/CH4 line opacity, H2-H2/H2-He/H2-CH4 CIA and Rayleigh scattering; the H2O nu grid spans 200–42000 cm^-1 and the temperature grid spans 100–3500 K. The comparison runs on turing with one NVIDIA RTX PRO 6000 Blackwell Max-Q in Slurm's `gpu` partition, using jax 0.12.0.1, jaxlib 0.12.0.1 and Python 3.12.13.
+
+### Synthetic active-species parity
+
+This compares `jaxposeidon.compute_spectrum` against upstream `POSEIDON.core.compute_spectrum` on an H2/He background with H2O as an active species through the opacity-sampling code path.
+
+**The H2O cross section is synthetic**: `log10(sigma)` is sampled IID from `U(-23, -21)` on the `(nu, logP, T)` grid. It is not a HITRAN / HITEMP / ExoMol line list and does not reproduce POSEIDON's introductory transmission example.
+
+The configuration uses a 1000 K isotherm, isochem `X_H2O = 1e-4` (`log10 = -4.0`), 50 pressure layers, and R=500 over 1–3 µm. Full provenance (grid ranges, random seed, IID distribution, atmospheric and wavelength settings, and parity measurements) is in `benchmarks/synthetic_opacity_provenance.json`.
+
+![synthetic H2O opacity-sampling parity](figures/parity_synthetic_h2o.png)
+
+Max |residual| = 0 ppm across 549 wavelength points.
+
+This confirms the opacity-sampling data path end-to-end; it is not evidence of parity on a realistic molecular line list. A real-opacity validation needs the POSEIDON opacity database staged at `POSEIDON_input_data` and is not in this PR.
+
+### Rayleigh + MacMad17 cloud geometry
+
+Six H2/He Rayleigh / MacMad17 cloud configurations probe cloud geometry and instrument convolution specifically. They do not represent physical atmospheres with molecular absorption and do not provide exhaustive validation.
 
 ![spectra parity](figures/parity_spectra.png)
 
-End-to-end through the instrument model on a JWST NIRSpec PRISM-style
-40-bin layout (max binned residual = 0 ppm):
+Spectral parity across the six Rayleigh / MacMad17 cloud configurations.
 
 ![binned parity](figures/parity_binned.png)
 
-Distribution of max-per-case |Δ(transit depth)| across the 396-case
-sweep — 395 bit-exact, one case at 1.7×10⁻¹² ppm:
+Parity after instrument convolution and binning.
 
 ![sweep histogram](figures/sweep_histogram.png)
 
-Reproduce with `python scripts/generate_{parity_figures,binning_figure,sweep_histogram}.py`.
+Residual distribution across the 396-case parametric sweep.
 
+Reproduce with `python scripts/generate_{realistic_tutorial_parity_figure,synthetic_opacity_parity_figure,parity_figures,binning_figure,sweep_histogram}.py` — the first two require POSEIDON installed, and the realistic one additionally requires `POSEIDON_input_data` pointed at a staged copy of the Zenodo v1.3 inputs (see `benchmarks/README.md`).
+
+## Benchmarks
+
+Measurements run on turing in the Slurm `gpu` partition with 1× NVIDIA RTX PRO 6000 Blackwell Max-Q. The environment uses jax 0.12.0.1, jaxlib 0.12.0.1, Python 3.12.13 and numpy 2.5.5.
+
+The workload has `N_layers = 60` and `N_wl = 400`, with 20 repeats for the GPU run and 10 for the CPU run. Each JAX call is followed by `block_until_ready()`. The first call is recorded separately as compile+run.
+
+The baselines use matched boundaries:
+
+- `poseidon_e2e`: upstream `POSEIDON.transmission.TRIDENT` (numba-JIT) on CPU, end-to-end including geometry setup. This is the code upstream ships.
+- `numpy_e2e`: `jaxposeidon._transmission.TRIDENT`, the local numpy port, end-to-end including geometry setup. It is a self-consistency check only, not representative of production POSEIDON, which uses numba.
+- `jax_e2e`: numpy `setup_TRIDENT_geometry` followed by JAX `TRIDENT_kernel_jit` with `block_until_ready()`. Geometry is recomputed each call, representing a sampler where cloud morphology varies.
+- `jax_kernel`: the JAX kernel only, with geometry precomputed once outside the timer, representing a sampler with fixed geometry (constant cloud / varying PT / X).
+
+Each batch element has unique random `kappa_clear` / `kappa_cloud` arrays; batches do not broadcast an identical spectrum. Comparing `jax_kernel` with `poseidon_e2e` for a single spectrum gives `max |residual| = 0.000e+00 ppm`, bit-exact in float64.
+
+### CPU results
+
+Times are µs per spectrum, reported as medians over 10 repeats on turing with `--cpus-per-task=4` and `JAX_PLATFORMS=cpu`.
+
+| batch | poseidon_e2e | numpy_e2e | jax_e2e | jax_kernel |
+|---:|---:|---:|---:|---:|
+| 1 | — (warmup noise) | 11 501 | 6 667 | 156 |
+| 4 | 280 | 10 098 | 1 794 | 97 |
+| 16 | 285 | 10 128 | 509 | 89 |
+| 64 | 278 | 10 253 | 201 | 115 |
+| 256 | skipped | skipped | 126 | 97 |
+| 1024 | skipped | skipped | 102 | 99 |
+
+### GPU results
+
+Times are µs per spectrum, reported as medians over 20 repeats on turing with `--gres=gpu:1`. The `poseidon_e2e` and `numpy_e2e` references run on the host CPU of the same node.
+
+| batch | poseidon_e2e (CPU) | numpy_e2e (CPU) | jax_e2e (GPU) | jax_kernel (GPU) |
+|---:|---:|---:|---:|---:|
+| 1 | 331 | 11 533 | 7 485 | 77.2 |
+| 4 | 295 | 10 200 | 1 800 | 25.5 |
+| 16 | 290 | 10 277 | 472 | 9.9 |
+| 64 | 293 | 10 179 | 123 | 6.6 |
+| 256 | skipped | skipped | 34.6 | 5.4 |
+| 1024 | skipped | skipped | 12.5 | 5.2 |
+| 4096 | skipped | skipped | 6.9 | 5.1 |
+
+### Compile and first-call costs
+
+First-call costs are recorded separately and amortised across subsequent calls with the same shapes.
+
+- CPU `jax_e2e`: approximately 70 ms; CPU `jax_kernel`: approximately 50 ms.
+- GPU `jax_e2e`: approximately 13.8 s (XLA compile); GPU `jax_kernel`: approximately 130 ms.
+- POSEIDON numba warmup: approximately 0.5–20 ms depending on batch; numba caches after warmup.
+
+### Interpretation
+
+The throughput advantage is in the kernel-only measurement. At batch = 4096, GPU `jax_kernel` takes 5.1 µs per spectrum, compared with approximately 293 µs per spectrum for upstream POSEIDON on CPU: approximately 57× higher throughput for the sampler pattern where geometry is fixed and only opacity varies between steps.
+
+At batch = 1, recomputing geometry each call makes GPU `jax_e2e` slower than upstream POSEIDON on CPU (7.5 ms versus 0.33 ms). GPU execution wins only when the kernel work is large enough to pay for device transfers; batching is the intended inference pattern.
+
+The numpy port is approximately 35× slower than upstream POSEIDON at batch = 16 because upstream uses numba. `numpy_e2e` serves as a self-consistency reference, not a substitute for the upstream baseline. The `jax_kernel` output matches `poseidon_e2e` at bit-level precision in float64, with max |residual| = 0 ppm on the compared batch element.
+
+### Reproducing
+
+- Slurm: `sbatch benchmarks/bench_turing.sbatch` runs CPU then GPU, using 10 CPU repeats and 20 GPU repeats. Both pass `--numpy-max-batch 64` to avoid the slow numpy-port baseline on large batches.
+- One-off: `python scripts/bench_trident.py --out run.json --repeats 20 --batches 1 4 16 64 256 1024 --numpy-max-batch 64`. Set `JAX_PLATFORMS=cpu` to force CPU execution.
+- Raw results: `benchmarks/bench_turing_cpu.json` and `benchmarks/bench_turing_gpu.json`; full Slurm log: `benchmarks/slurm-7469.out`.
+- The `jax_e2e` timings depend on hitting the jit cache: the benchmark hoists the jit outside the per-call closure. Re-creating the jit each call incurs compilation at every step.
+
+The production headline is kernel-only batched throughput on GPU; end-to-end execution with per-call geometry recomputation shows no GPU win at batch = 1 and begins paying off around batch = 16, while upstream POSEIDON remains the appropriate single-spectrum CPU baseline.
 ## Scope (v0.5)
 
 v0.5 covers POSEIDON's full forward-model surface at numpy/scipy parity.

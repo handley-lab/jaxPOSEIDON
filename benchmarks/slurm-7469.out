@@ -1,0 +1,103 @@
+== host ==
+turing
+2026-11-16T18:54:46+00:00
+== nvidia-smi ==
+GPU 0: NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition (UUID: GPU-5abac74b-6a5f-755c-21b2-7cf829717c35)
+== jax devices ==
+0.12.0.1 [CudaDevice(id=0)] gpu
+== POSEIDON available ==
+<function TRIDENT at 0x7efc06647d80>
+
+== CPU benchmark (JAX_PLATFORMS=cpu) ==
+
+=== batch = 1 ===
+  poseidon_e2e : median   0.334 ms total,   334.48 µs/spectrum (first 92.0 ms)
+  precision     : max|Δ| vs upstream 3.469e-12 ppm
+  numpy_e2e    : median  11.501 ms total, 11500.52 µs/spectrum
+  jax_e2e      : median   6.667 ms total,  6667.06 µs/spectrum (first 137.4 ms)
+  jax_kernel   : median   0.156 ms total,   156.41 µs/spectrum (first 48.2 ms)
+
+=== batch = 4 ===
+  poseidon_e2e : median   1.119 ms total,   279.65 µs/spectrum (first 1.6 ms)
+  precision     : max|Δ| vs upstream 3.469e-12 ppm
+  numpy_e2e    : median  40.393 ms total, 10098.30 µs/spectrum
+  jax_e2e      : median   7.175 ms total,  1793.74 µs/spectrum (first 73.1 ms)
+  jax_kernel   : median   0.389 ms total,    97.15 µs/spectrum (first 47.6 ms)
+
+=== batch = 16 ===
+  poseidon_e2e : median   4.559 ms total,   284.97 µs/spectrum (first 5.1 ms)
+  precision     : max|Δ| vs upstream 3.469e-12 ppm
+  numpy_e2e    : median 162.047 ms total, 10127.94 µs/spectrum
+  jax_e2e      : median   8.145 ms total,   509.08 µs/spectrum (first 74.1 ms)
+  jax_kernel   : median   1.420 ms total,    88.78 µs/spectrum (first 48.8 ms)
+
+=== batch = 64 ===
+  poseidon_e2e : median  17.802 ms total,   278.16 µs/spectrum (first 19.6 ms)
+  precision     : max|Δ| vs upstream 3.469e-12 ppm
+  numpy_e2e    : median 656.177 ms total, 10252.76 µs/spectrum
+  jax_e2e      : median  12.841 ms total,   200.64 µs/spectrum (first 78.5 ms)
+  jax_kernel   : median   7.344 ms total,   114.75 µs/spectrum (first 53.6 ms)
+
+=== batch = 256 ===
+  poseidon_e2e : skipped (batch > numpy_max_batch)
+  numpy_e2e    : skipped (batch > numpy_max_batch)
+  jax_e2e      : median  32.163 ms total,   125.64 µs/spectrum (first 82.5 ms)
+  jax_kernel   : median  24.835 ms total,    97.01 µs/spectrum (first 79.4 ms)
+
+=== batch = 1024 ===
+  poseidon_e2e : skipped (batch > numpy_max_batch)
+  numpy_e2e    : skipped (batch > numpy_max_batch)
+  jax_e2e      : median 104.948 ms total,   102.49 µs/spectrum (first 151.9 ms)
+  jax_kernel   : median 101.030 ms total,    98.66 µs/spectrum (first 154.3 ms)
+
+Wrote /home/will/work/jaxposeidon-ryan-2026-11-16/bench_turing_v2_cpu.json
+
+== GPU benchmark ==
+
+=== batch = 1 ===
+  poseidon_e2e : median   0.287 ms total,   287.25 µs/spectrum (first 85.3 ms)
+  precision     : max|Δ| vs upstream 0.000e+00 ppm
+  numpy_e2e    : median  10.019 ms total, 10019.37 µs/spectrum
+  jax_e2e      : median   7.154 ms total,  7153.87 µs/spectrum (first 7596.4 ms)
+  jax_kernel   : median   0.068 ms total,    67.65 µs/spectrum (first 93.9 ms)
+
+=== batch = 4 ===
+  poseidon_e2e : median   1.168 ms total,   292.03 µs/spectrum (first 1.3 ms)
+  precision     : max|Δ| vs upstream 0.000e+00 ppm
+  numpy_e2e    : median  40.098 ms total, 10024.40 µs/spectrum
+  jax_e2e      : median   7.033 ms total,  1758.18 µs/spectrum (first 7091.8 ms)
+  jax_kernel   : median   0.083 ms total,    20.74 µs/spectrum (first 206.3 ms)
+
+=== batch = 16 ===
+  poseidon_e2e : median   4.814 ms total,   300.88 µs/spectrum (first 5.3 ms)
+  precision     : max|Δ| vs upstream 0.000e+00 ppm
+  numpy_e2e    : median 161.128 ms total, 10070.48 µs/spectrum
+  jax_e2e      : median   7.522 ms total,   470.14 µs/spectrum (first 7121.1 ms)
+  jax_kernel   : median   0.167 ms total,    10.41 µs/spectrum (first 110.0 ms)
+
+=== batch = 64 ===
+  poseidon_e2e : median  20.357 ms total,   318.07 µs/spectrum (first 20.4 ms)
+  precision     : max|Δ| vs upstream 0.000e+00 ppm
+  numpy_e2e    : median 667.201 ms total, 10425.01 µs/spectrum
+  jax_e2e      : median   8.207 ms total,   128.23 µs/spectrum (first 7269.6 ms)
+  jax_kernel   : median   0.390 ms total,     6.10 µs/spectrum (first 111.4 ms)
+
+=== batch = 256 ===
+  poseidon_e2e : skipped (batch > numpy_max_batch)
+  numpy_e2e    : skipped (batch > numpy_max_batch)
+  jax_e2e      : median   9.342 ms total,    36.49 µs/spectrum (first 7405.9 ms)
+  jax_kernel   : median   1.384 ms total,     5.41 µs/spectrum (first 170.0 ms)
+
+=== batch = 1024 ===
+  poseidon_e2e : skipped (batch > numpy_max_batch)
+  numpy_e2e    : skipped (batch > numpy_max_batch)
+  jax_e2e      : median  12.937 ms total,    12.63 µs/spectrum (first 7964.4 ms)
+  jax_kernel   : median   5.231 ms total,     5.11 µs/spectrum (first 180.3 ms)
+
+=== batch = 4096 ===
+  poseidon_e2e : skipped (batch > numpy_max_batch)
+  numpy_e2e    : skipped (batch > numpy_max_batch)
+  jax_e2e      : median  31.027 ms total,     7.57 µs/spectrum (first 8493.2 ms)
+  jax_kernel   : median  20.804 ms total,     5.08 µs/spectrum (first 173.9 ms)
+
+Wrote /home/will/work/jaxposeidon-ryan-2026-11-16/bench_turing_v2_gpu.json

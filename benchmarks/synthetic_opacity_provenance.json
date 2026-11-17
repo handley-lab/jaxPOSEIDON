@@ -1,0 +1,57 @@
+{
+  "opacity_provenance": {
+    "T_h2o_range_K": [
+      200.0,
+      2000.0
+    ],
+    "T_h2o_N": 12,
+    "log10P_h2o_range": [
+      -6.0,
+      2.0
+    ],
+    "log10P_h2o_N": 9,
+    "nu_h2o_range_cm_inv": [
+      2000.0,
+      12000.0
+    ],
+    "nu_h2o_N": 200,
+    "log10_sigma_distribution": "uniform(-23, -21)",
+    "cia_log_value": -50.0
+  },
+  "atmosphere": {
+    "PT_profile": "isotherm",
+    "T_K": 1000.0,
+    "X_profile": "isochem",
+    "log10_X_H2O": -4.0,
+    "X_H2O": 0.0001,
+    "P_range_bar": [
+      100.0,
+      1e-07
+    ],
+    "N_layers": 50
+  },
+  "wavelength_grid": {
+    "scheme": "wl_grid_constant_R",
+    "wl_min_um": 1.0,
+    "wl_max_um": 3.0,
+    "R": 500,
+    "N_wl": 549
+  },
+  "T_fine_range_K": [
+    800.0,
+    1200.0,
+    20.0
+  ],
+  "log_P_fine_range": [
+    -6.0,
+    2.000000000000007,
+    0.40000000000000036
+  ],
+  "parity_vs_POSEIDON_ppm": {
+    "max_abs": 0.0,
+    "median_abs": 0.0,
+    "poseidon_max_abs": 11333.59817168486,
+    "rtol_equivalent": 0.0
+  },
+  "not_a_realistic_validation": true
+}
